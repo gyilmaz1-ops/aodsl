@@ -9,7 +9,7 @@ REG = ROOT / "architecture/invariants.v1.json"
 registry = json.loads(REG.read_text())
 items = registry["invariants"]
 
-expected = [f"INV-{i:03d}" for i in range(1, 51)]
+expected = [f"INV-{i:03d}" for i in range(1, 52)]
 ids = [item["id"] for item in items]
 
 assert ids == expected, f"invariant sequence mismatch: {ids}"
@@ -19,7 +19,6 @@ for item in items:
     assert item["name"].strip(), f"{item['id']} missing name"
     assert item["implementation"], f"{item['id']} missing implementation"
     assert item["tests"], f"{item['id']} missing tests"
-
     for rel in item["implementation"] + item["tests"]:
         assert (ROOT / rel).is_file(), f"{item['id']} missing artifact: {rel}"
 
@@ -30,13 +29,8 @@ manifest = {
     "registry_sha256": hashlib.sha256(REG.read_bytes()).hexdigest(),
     "invariant_ids": ids,
 }
-
 out = ROOT / "architecture/freeze-manifest.v1.json"
 out.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
-
 print("AODSL v1 ARCHITECTURE FREEZE GATE: PASSED")
-print(
-    f"Invariant coverage: {expected[0]}..{expected[-1]} "
-    f"({len(ids)}/{len(expected)})"
-)
+print(f"Invariant coverage: {expected[0]}..{expected[-1]} ({len(ids)}/{len(expected)})")
 print("Registry SHA256:", manifest["registry_sha256"])

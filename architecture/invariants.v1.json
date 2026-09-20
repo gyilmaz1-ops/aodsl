@@ -565,6 +565,19 @@
       "tests": [
         "tests/certification/test_inv050_signed_provenance_policy.py"
       ]
+    },
+    {
+      "id": "INV-051",
+      "implementation": [
+        "src/aodsl/certification/evidence_promotion.py",
+        "tools/promote_live_certification.py",
+        "tools/run_live_postgres_certification.py",
+        "tools/certify_with_docker.sh"
+      ],
+      "name": "Atomic Certification Evidence Promotion",
+      "tests": [
+        "tests/certification/test_inv051_atomic_evidence_promotion.py"
+      ]
     }
   ],
   "schema": "aodsl.invariant-registry.v1"
