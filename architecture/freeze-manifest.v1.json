@@ -1,6 +1,6 @@
 {
   "architecture_version": "1.0.0",
-  "invariant_count": 48,
+  "invariant_count": 50,
   "invariant_ids": [
     "INV-001",
     "INV-002",
@@ -49,8 +49,10 @@
     "INV-045",
     "INV-046",
     "INV-047",
-    "INV-048"
+    "INV-048",
+    "INV-049",
+    "INV-050"
   ],
-  "registry_sha256": "06bb40afdd56e0b1f3b2faa830483c8924cdf776e1fde91ab96b5983b1103cfc",
+  "registry_sha256": "7021a715a25b256c02ba775a97bdaca0275440393f8dacd3911b38b16790d15a",
   "schema": "aodsl.architecture-freeze.v1"
 }
