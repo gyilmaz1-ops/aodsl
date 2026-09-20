@@ -1,0 +1,1 @@
+RULE BROKEN VERSION "1.0" PRIORITY 1 WHEN EVENT "x" AND state.x == THEN DISPATCH capability=VERIFY_CLAIM target=state.x reason=X STOP TRUE

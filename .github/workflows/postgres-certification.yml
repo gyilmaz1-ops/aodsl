@@ -1,0 +1,36 @@
+name: AODSL PostgreSQL Certification
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  certify-postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: aodsl
+          POSTGRES_PASSWORD: aodsl_cert
+          POSTGRES_DB: aodsl_cert
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U aodsl -d aodsl_cert"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+    env:
+      AODSL_POSTGRES_DSN: postgresql://aodsl:aodsl_cert@127.0.0.1:5432/aodsl_cert
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[postgres,test]"
+      - run: python tools/run_live_postgres_certification.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aodsl-live-certification-status
+          path: dist/live-certification-status.json

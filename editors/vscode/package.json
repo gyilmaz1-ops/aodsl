@@ -1,0 +1,48 @@
+{
+  "name": "aodsl-language",
+  "displayName": "AODSL Language Support",
+  "version": "1.0.0",
+  "publisher": "aodsl",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onLanguage:aodsl"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "aodsl",
+        "aliases": [
+          "AODSL",
+          "aodsl"
+        ],
+        "extensions": [
+          ".aodsl"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "aodsl",
+        "scopeName": "source.aodsl",
+        "path": "./syntaxes/aodsl.tmLanguage.json"
+      }
+    ],
+    "configuration": {
+      "title": "AODSL",
+      "properties": {
+        "aodsl.pythonPath": {
+          "type": "string",
+          "default": "python",
+          "description": "Python executable with AODSL installed."
+        }
+      }
+    }
+  }
+}

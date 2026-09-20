@@ -1,0 +1,37 @@
+RULE R001 VERSION "0.1.1" PRIORITY 1000
+ WHEN EVENT "verification.completed" AND event.verification.status == REJECTED AND event.verification.retry_count >= 3
+ THEN INVALIDATE target=event.verification.claim_id reason=MAX_RETRY_EXCEEDED
+ STOP TRUE
+RULE R002 VERSION "0.1.1" PRIORITY 950
+ WHEN EVENT "conflict.created" AND event.conflict.type == DIRECT_CONTRADICTION AND event.conflict.materiality == CRITICAL
+ THEN DISPATCH capability=ADVERSARIAL_ANALYSIS target=event.conflict.id reason=DIRECT_CONTRADICTION
+ STOP TRUE
+RULE R003 VERSION "0.1.1" PRIORITY 900
+ WHEN EVENT "verification.completed" AND event.verification.status == REJECTED AND event.verification.retry_count < 3
+ THEN DISPATCH capability=event.verification.required_capability target=event.verification.claim_id reason=event.verification.remediation_type
+ STOP TRUE
+RULE R004 VERSION "0.1.1" PRIORITY 800
+ WHEN EVENT "graph.changed" AND EXISTS state.claim.required_calculation AND state.claim.calculation_exists == FALSE
+ THEN DISPATCH capability=CALCULATE_FINANCIAL_METRIC target=state.claim.id reason=MISSING_REQUIRED_CALCULATION
+ STOP TRUE
+RULE R005 VERSION "0.1.1" PRIORITY 750
+ WHEN EVENT "graph.changed" AND EXISTS state.claim.id AND state.claim.verification_exists == FALSE
+ THEN DISPATCH capability=VERIFY_CLAIM target=state.claim.id reason=MISSING_VERIFICATION
+ STOP TRUE
+RULE R006 VERSION "0.1.1" PRIORITY 700
+ WHEN EVENT "graph.changed" AND state.claim.data_deficit_type == DATA_NOT_DISCLOSED
+ THEN CREATE entity=DATA_DEFICIT target=state.claim.id type=DATA_NOT_DISCLOSED
+ STOP TRUE
+RULE R007 VERSION "0.1.1" PRIORITY 650
+ WHEN EVENT "graph.changed" AND state.claim.data_deficit_type == DATA_NOT_FOUND AND state.claim.search_count < 3
+ THEN DISPATCH capability=RESEARCH_SOURCE target=state.claim.id reason=DATA_NOT_FOUND
+ STOP TRUE
+RULE R008 VERSION "0.1.1" PRIORITY 500
+ WHEN EVENT "graph.changed" AND state.stage == FUNDAMENTAL AND state.gate.required_claims_complete == TRUE AND state.gate.required_evidence_complete == TRUE AND state.gate.required_calculations_complete == TRUE AND state.gate.verification_complete == TRUE AND state.gate.critical_conflicts_resolved == TRUE AND state.gate.critical_data_deficits_registered == TRUE AND state.gate.critical_confidence >= 50
+ THEN TRANSITION target=stage from=FUNDAMENTAL to=VALUATION
+ STOP TRUE
+RULE R009 VERSION "0.5.0" PRIORITY 640
+ WHEN EVENT "graph.changed" AND state.claim.data_deficit_type == DATA_NOT_FOUND AND state.claim.search_count >= 3
+ THEN CREATE entity=DATA_DEFICIT target=state.claim.id type=RESEARCH_EXHAUSTED
+ STOP TRUE
+

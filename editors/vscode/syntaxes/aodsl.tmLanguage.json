@@ -1,0 +1,40 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "AODSL",
+  "scopeName": "source.aodsl",
+  "patterns": [
+    {
+      "name": "comment.line.number-sign.aodsl",
+      "match": "#.*$"
+    },
+    {
+      "name": "keyword.control.aodsl",
+      "match": "\\b(RULE|VERSION|PRIORITY|WHEN|EVENT|AND|OR|NOT|THEN|STOP|TRUE|FALSE|EXISTS|MISSING)\\b"
+    },
+    {
+      "name": "support.function.aodsl",
+      "match": "\\b(DISPATCH|CREATE|INVALIDATE|TRANSITION)\\b"
+    },
+    {
+      "name": "constant.language.aodsl",
+      "match": "\\b(NULL|UNKNOWN|NONE)\\b"
+    },
+    {
+      "name": "string.quoted.double.aodsl",
+      "begin": "\"",
+      "end": "\""
+    },
+    {
+      "name": "constant.numeric.aodsl",
+      "match": "\\b\\d+(?:\\.\\d+)?\\b"
+    },
+    {
+      "name": "variable.other.aodsl",
+      "match": "\\b(?:state|event)\\.[A-Za-z_][A-Za-z0-9_.]*\\b"
+    },
+    {
+      "name": "keyword.operator.aodsl",
+      "match": "==|!=|>=|<=|>|<|="
+    }
+  ]
+}

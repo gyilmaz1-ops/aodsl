@@ -1,0 +1,571 @@
+{
+  "architecture_version": "1.0.0",
+  "invariants": [
+    {
+      "id": "INV-001",
+      "implementation": [
+        "src/aodsl/compiler.py",
+        "src/aodsl/runtime.py"
+      ],
+      "name": "Determinism",
+      "tests": [
+        "tests/contract/test_core_invariants.py"
+      ]
+    },
+    {
+      "id": "INV-002",
+      "implementation": [
+        "src/aodsl/compiler.py",
+        "src/aodsl/runtime.py"
+      ],
+      "name": "Rule Engine State Isolation",
+      "tests": [
+        "tests/contract/test_core_invariants.py"
+      ]
+    },
+    {
+      "id": "INV-003",
+      "implementation": [
+        "src/aodsl/compiler.py",
+        "src/aodsl/runtime.py"
+      ],
+      "name": "Plan Before Mutation",
+      "tests": [
+        "tests/contract/test_core_invariants.py"
+      ]
+    },
+    {
+      "id": "INV-004",
+      "implementation": [
+        "src/aodsl/compiler.py",
+        "src/aodsl/runtime.py"
+      ],
+      "name": "Canonical State Identity",
+      "tests": [
+        "tests/contract/test_core_invariants.py"
+      ]
+    },
+    {
+      "id": "INV-005",
+      "implementation": [
+        "src/aodsl/compiler.py",
+        "src/aodsl/runtime.py"
+      ],
+      "name": "Stale Plan Rejection R409",
+      "tests": [
+        "tests/contract/test_core_invariants.py"
+      ]
+    },
+    {
+      "id": "INV-006",
+      "implementation": [
+        "src/aodsl/compiler.py",
+        "src/aodsl/runtime.py"
+      ],
+      "name": "Atomic State Mutation",
+      "tests": [
+        "tests/contract/test_core_invariants.py"
+      ]
+    },
+    {
+      "id": "INV-007",
+      "implementation": [
+        "src/aodsl/compiler.py",
+        "src/aodsl/runtime.py"
+      ],
+      "name": "Durable Event Log",
+      "tests": [
+        "tests/contract/test_core_invariants.py"
+      ]
+    },
+    {
+      "id": "INV-008",
+      "implementation": [
+        "src/aodsl/compiler.py",
+        "src/aodsl/runtime.py"
+      ],
+      "name": "Committed Event Finality",
+      "tests": [
+        "tests/contract/test_core_invariants.py"
+      ]
+    },
+    {
+      "id": "INV-009",
+      "implementation": [
+        "src/aodsl/compiler.py",
+        "src/aodsl/runtime.py"
+      ],
+      "name": "Transactional Outbox Boundary",
+      "tests": [
+        "tests/contract/test_core_invariants.py"
+      ]
+    },
+    {
+      "id": "INV-010",
+      "implementation": [
+        "src/aodsl/compiler.py",
+        "src/aodsl/runtime.py"
+      ],
+      "name": "At-Least-Once Physical Delivery",
+      "tests": [
+        "tests/contract/test_core_invariants.py"
+      ]
+    },
+    {
+      "id": "INV-011",
+      "implementation": [
+        "src/aodsl/compiler.py",
+        "src/aodsl/runtime.py"
+      ],
+      "name": "Stable Idempotency",
+      "tests": [
+        "tests/contract/test_core_invariants.py"
+      ]
+    },
+    {
+      "id": "INV-012",
+      "implementation": [
+        "src/aodsl/compiler.py",
+        "src/aodsl/runtime.py"
+      ],
+      "name": "Crash Recoverability",
+      "tests": [
+        "tests/contract/test_core_invariants.py"
+      ]
+    },
+    {
+      "id": "INV-013",
+      "implementation": [
+        "src/aodsl/compiler.py",
+        "src/aodsl/runtime.py"
+      ],
+      "name": "Three-Valued Predicate Logic",
+      "tests": [
+        "tests/contract/test_core_invariants.py"
+      ]
+    },
+    {
+      "id": "INV-014",
+      "implementation": [
+        "src/aodsl/compiler.py",
+        "src/aodsl/runtime.py"
+      ],
+      "name": "Compile-Time Contextual Symbol Resolution",
+      "tests": [
+        "tests/contract/test_core_invariants.py"
+      ]
+    },
+    {
+      "id": "INV-015",
+      "implementation": [
+        "src/aodsl/compiler.py",
+        "src/aodsl/runtime.py"
+      ],
+      "name": "Semantic Rule Conflict",
+      "tests": [
+        "tests/contract/test_core_invariants.py"
+      ]
+    },
+    {
+      "id": "INV-016",
+      "implementation": [
+        "src/aodsl/compiler.py",
+        "src/aodsl/runtime.py"
+      ],
+      "name": "First-Match Determinism",
+      "tests": [
+        "tests/contract/test_core_invariants.py"
+      ]
+    },
+    {
+      "id": "INV-017",
+      "implementation": [
+        "src/aodsl/compiler.py",
+        "src/aodsl/runtime.py"
+      ],
+      "name": "Capability Indirection",
+      "tests": [
+        "tests/contract/test_core_invariants.py"
+      ]
+    },
+    {
+      "id": "INV-018",
+      "implementation": [
+        "src/aodsl/compiler.py",
+        "src/aodsl/runtime.py"
+      ],
+      "name": "Auditability",
+      "tests": [
+        "tests/contract/test_core_invariants.py"
+      ]
+    },
+    {
+      "id": "INV-019",
+      "implementation": [
+        "src/aodsl/causal_runtime.py",
+        "src/aodsl/snapshot.py",
+        "src/aodsl/research.py"
+      ],
+      "name": "Deterministic Replay",
+      "tests": [
+        "tests/contract/test_runtime_extensions.py"
+      ]
+    },
+    {
+      "id": "INV-020",
+      "implementation": [
+        "src/aodsl/causal_runtime.py",
+        "src/aodsl/snapshot.py",
+        "src/aodsl/research.py"
+      ],
+      "name": "Poison Event Isolation",
+      "tests": [
+        "tests/contract/test_runtime_extensions.py"
+      ]
+    },
+    {
+      "id": "INV-021",
+      "implementation": [
+        "src/aodsl/causal_runtime.py",
+        "src/aodsl/snapshot.py",
+        "src/aodsl/research.py"
+      ],
+      "name": "Bounded Causal Propagation",
+      "tests": [
+        "tests/contract/test_runtime_extensions.py"
+      ]
+    },
+    {
+      "id": "INV-022",
+      "implementation": [
+        "src/aodsl/causal_runtime.py",
+        "src/aodsl/snapshot.py",
+        "src/aodsl/research.py"
+      ],
+      "name": "Bounded Ephemeral Idempotency State",
+      "tests": [
+        "tests/contract/test_runtime_extensions.py"
+      ]
+    },
+    {
+      "id": "INV-023",
+      "implementation": [
+        "src/aodsl/causal_runtime.py",
+        "src/aodsl/snapshot.py",
+        "src/aodsl/research.py"
+      ],
+      "name": "Source-to-Runtime Integrity",
+      "tests": [
+        "tests/contract/test_runtime_extensions.py"
+      ]
+    },
+    {
+      "id": "INV-024",
+      "implementation": [
+        "src/aodsl/causal_runtime.py",
+        "src/aodsl/snapshot.py",
+        "src/aodsl/research.py"
+      ],
+      "name": "Declared Snapshot Dependency",
+      "tests": [
+        "tests/contract/test_runtime_extensions.py"
+      ]
+    },
+    {
+      "id": "INV-025",
+      "implementation": [
+        "src/aodsl/causal_runtime.py",
+        "src/aodsl/snapshot.py",
+        "src/aodsl/research.py"
+      ],
+      "name": "Bounded Research Termination",
+      "tests": [
+        "tests/contract/test_runtime_extensions.py"
+      ]
+    },
+    {
+      "id": "INV-026",
+      "implementation": [
+        "src/aodsl/multiworker.py",
+        "src/aodsl/outbox.py",
+        "src/aodsl/e2e.py"
+      ],
+      "name": "Exclusive Leased Processing",
+      "tests": [
+        "tests/contract/test_runtime_extensions.py"
+      ]
+    },
+    {
+      "id": "INV-027",
+      "implementation": [
+        "src/aodsl/multiworker.py",
+        "src/aodsl/outbox.py",
+        "src/aodsl/e2e.py"
+      ],
+      "name": "Lease Recovery",
+      "tests": [
+        "tests/contract/test_runtime_extensions.py"
+      ]
+    },
+    {
+      "id": "INV-028",
+      "implementation": [
+        "src/aodsl/multiworker.py",
+        "src/aodsl/outbox.py",
+        "src/aodsl/e2e.py"
+      ],
+      "name": "Fenced Finalization",
+      "tests": [
+        "tests/contract/test_runtime_extensions.py"
+      ]
+    },
+    {
+      "id": "INV-029",
+      "implementation": [
+        "src/aodsl/multiworker.py",
+        "src/aodsl/outbox.py",
+        "src/aodsl/e2e.py"
+      ],
+      "name": "Bounded Event Retry",
+      "tests": [
+        "tests/contract/test_runtime_extensions.py"
+      ]
+    },
+    {
+      "id": "INV-030",
+      "implementation": [
+        "src/aodsl/multiworker.py",
+        "src/aodsl/outbox.py",
+        "src/aodsl/e2e.py"
+      ],
+      "name": "Exclusive Outbox Lease",
+      "tests": [
+        "tests/contract/test_runtime_extensions.py"
+      ]
+    },
+    {
+      "id": "INV-031",
+      "implementation": [
+        "src/aodsl/multiworker.py",
+        "src/aodsl/outbox.py",
+        "src/aodsl/e2e.py"
+      ],
+      "name": "Outbox Lease Recovery",
+      "tests": [
+        "tests/contract/test_runtime_extensions.py"
+      ]
+    },
+    {
+      "id": "INV-032",
+      "implementation": [
+        "src/aodsl/multiworker.py",
+        "src/aodsl/outbox.py",
+        "src/aodsl/e2e.py"
+      ],
+      "name": "Fenced Outbox Finalization",
+      "tests": [
+        "tests/contract/test_runtime_extensions.py"
+      ]
+    },
+    {
+      "id": "INV-033",
+      "implementation": [
+        "src/aodsl/multiworker.py",
+        "src/aodsl/outbox.py",
+        "src/aodsl/e2e.py"
+      ],
+      "name": "Bounded Outbox Retry",
+      "tests": [
+        "tests/contract/test_runtime_extensions.py"
+      ]
+    },
+    {
+      "id": "INV-034",
+      "implementation": [
+        "src/aodsl/multiworker.py",
+        "src/aodsl/outbox.py",
+        "src/aodsl/e2e.py"
+      ],
+      "name": "Atomic Event-to-Outbox Handoff",
+      "tests": [
+        "tests/contract/test_runtime_extensions.py"
+      ]
+    },
+    {
+      "id": "INV-035",
+      "implementation": [
+        "src/aodsl/multiworker.py",
+        "src/aodsl/outbox.py",
+        "src/aodsl/e2e.py"
+      ],
+      "name": "Crash-Recoverable Dispatch Continuity",
+      "tests": [
+        "tests/contract/test_runtime_extensions.py"
+      ]
+    },
+    {
+      "id": "INV-036",
+      "implementation": [
+        "src/aodsl/multiworker.py",
+        "src/aodsl/outbox.py",
+        "src/aodsl/e2e.py"
+      ],
+      "name": "End-to-End Stable Logical Effect",
+      "tests": [
+        "tests/contract/test_runtime_extensions.py"
+      ]
+    },
+    {
+      "id": "INV-037",
+      "implementation": [
+        "src/aodsl/multiworker.py",
+        "src/aodsl/outbox.py",
+        "src/aodsl/e2e.py"
+      ],
+      "name": "Cross-Worker Stale Finalizer Rejection",
+      "tests": [
+        "tests/contract/test_runtime_extensions.py"
+      ]
+    },
+    {
+      "id": "INV-038",
+      "implementation": [
+        "src/aodsl/schema.py",
+        "src/aodsl/unified_schema.py"
+      ],
+      "name": "Ordered Schema Evolution",
+      "tests": [
+        "tests/contract/test_schema_and_production.py"
+      ]
+    },
+    {
+      "id": "INV-039",
+      "implementation": [
+        "src/aodsl/schema.py",
+        "src/aodsl/unified_schema.py"
+      ],
+      "name": "Transactional Migration Atomicity",
+      "tests": [
+        "tests/contract/test_schema_and_production.py"
+      ]
+    },
+    {
+      "id": "INV-040",
+      "implementation": [
+        "src/aodsl/schema.py",
+        "src/aodsl/unified_schema.py"
+      ],
+      "name": "Migration Checksum Integrity",
+      "tests": [
+        "tests/contract/test_schema_and_production.py"
+      ]
+    },
+    {
+      "id": "INV-041",
+      "implementation": [
+        "src/aodsl/schema.py",
+        "src/aodsl/unified_schema.py"
+      ],
+      "name": "Incompatible Schema Fail-Fast",
+      "tests": [
+        "tests/contract/test_schema_and_production.py"
+      ]
+    },
+    {
+      "id": "INV-042",
+      "implementation": [
+        "src/aodsl/schema.py",
+        "src/aodsl/unified_schema.py"
+      ],
+      "name": "Single Schema Authority",
+      "tests": [
+        "tests/contract/test_schema_and_production.py"
+      ]
+    },
+    {
+      "id": "INV-043",
+      "implementation": [
+        "src/aodsl/identity.py"
+      ],
+      "name": "Globally Unique Durable Identity",
+      "tests": [
+        "tests/contract/test_inv043_identity.py"
+      ]
+    },
+    {
+      "id": "INV-044",
+      "implementation": [
+        "src/aodsl/exclusive_migration.py"
+      ],
+      "name": "Exclusive Migration Ownership",
+      "tests": [
+        "tests/contract/test_schema_and_production.py"
+      ]
+    },
+    {
+      "id": "INV-045",
+      "implementation": [
+        "src/aodsl/postgres_contract.py",
+        "src/aodsl/postgres_store.py"
+      ],
+      "name": "Production Multi-Node Claim/Fencing Semantics",
+      "tests": [
+        "tests/contract/test_schema_and_production.py"
+      ]
+    },
+    {
+      "id": "INV-046",
+      "implementation": [
+        "src/aodsl/graceful.py"
+      ],
+      "name": "Graceful Lease Handoff",
+      "tests": [
+        "tests/contract/test_schema_and_production.py"
+      ]
+    },
+    {
+      "id": "INV-047",
+      "implementation": [
+        "src/aodsl/observability.py"
+      ],
+      "name": "Observable Runtime Health",
+      "tests": [
+        "tests/contract/test_schema_and_production.py"
+      ]
+    },
+    {
+      "id": "INV-048",
+      "implementation": [
+        "src/aodsl/audit.py"
+      ],
+      "name": "Tamper-Evident Audit Trail",
+      "tests": [
+        "tests/contract/test_schema_and_production.py"
+      ]
+    },
+    {
+      "id": "INV-049",
+      "implementation": [
+        "src/aodsl/certification/source_binding.py",
+        "src/aodsl/certification/attestation.py",
+        "tools/run_live_postgres_certification.py"
+      ],
+      "name": "Certification-to-Source Binding",
+      "tests": [
+        "tests/certification/test_inv049_source_binding.py"
+      ]
+    },
+    {
+      "id": "INV-050",
+      "implementation": [
+        ".github/workflows/production-release.yml",
+        "tools/verify_signed_provenance_policy.py"
+      ],
+      "name": "CI-Authenticated Release Provenance",
+      "tests": [
+        "tests/certification/test_inv050_signed_provenance_policy.py"
+      ]
+    }
+  ],
+  "schema": "aodsl.invariant-registry.v1"
+}

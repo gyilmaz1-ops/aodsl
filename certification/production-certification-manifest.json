@@ -1,0 +1,42 @@
+{
+  "architecture": {
+    "invariants": {
+      "count": 50,
+      "first": "INV-001",
+      "last": "INV-050"
+    },
+    "registry_path": "architecture/invariants.v1.json",
+    "registry_sha256": "7021a715a25b256c02ba775a97bdaca0275440393f8dacd3911b38b16790d15a"
+  },
+  "evidence": {
+    "architecture": "PASSED",
+    "cert_pg_001": "CERTIFIED",
+    "operations": "CERTIFIED",
+    "path": "certification/evidence/live-certification-status.json",
+    "postgres": {
+      "covered": [
+        "independent-connection SKIP LOCKED exclusivity",
+        "event/outbox lease semantic parity",
+        "expired lease recovery",
+        "lease_version 7->8",
+        "stale finalizer rejection",
+        "current finalizer acceptance"
+      ],
+      "id": "CERT-PG-001",
+      "status": "CERTIFIED"
+    },
+    "production_deployment": "CERTIFIED",
+    "sha256": "6427f2c9de3d1f9069d38b86a1fee7bf3f094adbc10f9579d5dde0390a48d0db",
+    "tested_source_tree_sha256": "47a985417d6f6ac99c1e094a338afaec720b980986659eb20d008ee8e746a31f"
+  },
+  "hash_algorithm": "sha256",
+  "product": {
+    "name": "aodsl",
+    "version": "1.0.0"
+  },
+  "schema": "aodsl.production-certification.v1",
+  "source": {
+    "canonical_tree_sha256": "47a985417d6f6ac99c1e094a338afaec720b980986659eb20d008ee8e746a31f",
+    "entry_count": 65
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "architecture": {
+    "artifact_count": 29,
+    "id": "ARCH-001",
+    "status": "PASSED"
+  },
+  "operations": {
+    "id": "OPS-001",
+    "status": "CERTIFIED"
+  },
+  "postgres": {
+    "covered": [
+      "independent-connection SKIP LOCKED exclusivity",
+      "event/outbox lease semantic parity",
+      "expired lease recovery",
+      "lease_version 7->8",
+      "stale finalizer rejection",
+      "current finalizer acceptance"
+    ],
+    "id": "CERT-PG-001",
+    "status": "CERTIFIED"
+  },
+  "production_status": "CERTIFIED",
+  "tested_source_tree_sha256": "47a985417d6f6ac99c1e094a338afaec720b980986659eb20d008ee8e746a31f"
+}

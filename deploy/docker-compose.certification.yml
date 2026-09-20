@@ -1,0 +1,14 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: aodsl
+      POSTGRES_PASSWORD: aodsl_cert
+      POSTGRES_DB: aodsl_cert
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aodsl -d aodsl_cert"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    ports:
+      - "55432:5432"
