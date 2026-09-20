@@ -14,27 +14,38 @@ permissions:
 jobs:
   production-gate:
     name: Certified Production Build
+    # The GitHub runner is bootstrap infrastructure only.
+    # All certified build/release commands execute inside the
+    # digest-pinned INV-054 environment below.
     runs-on: ubuntu-latest
+    container:
+      image: python@sha256:47ae396f09c1303b8653019811a8498470603d7ffefc29cb07c88f1f8cb3d19f
     timeout-minutes: 15
     steps:
       - name: Checkout exact release source
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
+      - name: Verify certified build environment
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src
+        run: python tools/verify_build_environment.py
+
+      - name: Install hash-locked build and test toolchain
+        run: |
+          python -m pip install \
+            --require-hashes \
+            --only-binary=:all: \
+            -r requirements/build.lock
 
       - name: Install hash-locked production dependencies
         run: |
-          python -m pip install --upgrade pip
           python -m pip install \
             --require-hashes \
             --only-binary=:all: \
             -r requirements/production.lock
 
-      - name: Install AODSL and test tooling
-        run: python -m pip install -e ".[test]"
+      - name: Install AODSL without dependency resolution
+        run: python -m pip install --no-deps --no-build-isolation -e .
 
       - name: Verify hash-locked production dependencies
         run: python tools/verify_production_dependencies.py

@@ -611,6 +611,24 @@
       "tests": [
         "tests/certification/test_inv053_sbom_integrity.py"
       ]
+    },
+    {
+      "id": "INV-054",
+      "implementation": [
+        "architecture/build-environment.v1.json",
+        "requirements/build.lock",
+        "src/aodsl/certification/build_environment.py",
+        "src/aodsl/certification/release_identity.py",
+        "tools/verify_build_environment.py",
+        ".github/workflows/production-release.yml",
+        "src/aodsl/certification/attestation.py",
+        "tools/architecture_freeze_gate.py"
+      ],
+      "name": "Hermetic & Reproducible Build Environment",
+      "tests": [
+        "tests/certification/test_inv054_build_environment.py",
+        "tests/certification/test_inv052_release_identity_binding.py"
+      ]
     }
   ],
   "schema": "aodsl.invariant-registry.v1"

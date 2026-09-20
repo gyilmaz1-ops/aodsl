@@ -1,0 +1,29 @@
+{
+  "bootstrap": {
+    "pip_version": "25.0.1"
+  },
+  "build_toolchain": {
+    "installation_policy": {
+      "only_binary": true,
+      "require_hashes": true
+    },
+    "lock_path": "requirements/build.lock",
+    "lock_sha256": "f10c75853c6a2a0cde9803f66332974588b144212c148714e59673d7ed571cb4"
+  },
+  "invariant": "INV-054",
+  "oci": {
+    "digest": "sha256:47ae396f09c1303b8653019811a8498470603d7ffefc29cb07c88f1f8cb3d19f",
+    "image": "python",
+    "reference": "python@sha256:47ae396f09c1303b8653019811a8498470603d7ffefc29cb07c88f1f8cb3d19f",
+    "tag": "3.12.11-slim"
+  },
+  "platform": {
+    "architecture": "amd64",
+    "os": "linux"
+  },
+  "python": {
+    "implementation": "CPython",
+    "version": "3.12.11"
+  },
+  "schema": "aodsl.build-environment.v1"
+}

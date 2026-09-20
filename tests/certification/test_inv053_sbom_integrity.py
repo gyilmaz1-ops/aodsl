@@ -45,12 +45,61 @@ def make_root(tmp_path: Path) -> Path:
     root = tmp_path
 
     (root / "requirements").mkdir()
+    (root / "architecture").mkdir()
     (root / "dist").mkdir()
     (root / "certification").mkdir()
     (root / ".github/workflows").mkdir(parents=True)
 
     (root / "requirements/production.lock").write_text(
         hashed_lock(),
+        encoding="utf-8",
+    )
+
+    build_lock = root / "requirements/build.lock"
+    build_lock.write_text(
+        "setuptools==84.0.0 "
+        "--hash=sha256:"
+        + "e" * 64
+        + "\n",
+        encoding="utf-8",
+    )
+
+    build_lock_sha = sha256(build_lock)
+
+    (
+        root / "architecture/build-environment.v1.json"
+    ).write_text(
+        json.dumps(
+            {
+                "schema": "aodsl.build-environment.v1",
+                "invariant": "INV-054",
+                "platform": {
+                    "os": "linux",
+                    "architecture": "amd64",
+                },
+                "oci": {
+                    "image": "python",
+                    "tag": "3.12.11-slim",
+                    "digest": "sha256:47ae396f09c1303b8653019811a8498470603d7ffefc29cb07c88f1f8cb3d19f",
+                    "reference": "python@sha256:47ae396f09c1303b8653019811a8498470603d7ffefc29cb07c88f1f8cb3d19f",
+                },
+                "python": {
+                    "implementation": "CPython",
+                    "version": "3.12.11",
+                },
+                "bootstrap": {
+                    "pip_version": "25.0.1",
+                },
+                "build_toolchain": {
+                    "lock_path": "requirements/build.lock",
+                    "lock_sha256": build_lock_sha,
+                    "installation_policy": {
+                        "require_hashes": True,
+                        "only_binary": True,
+                    },
+                },
+            }
+        ),
         encoding="utf-8",
     )
 
@@ -284,7 +333,7 @@ def test_release_identity_binds_sbom_and_lock(
 
     assert (
         RELEASE_IDENTITY_SCHEMA
-        == "aodsl.certified-release-identity.v2"
+        == "aodsl.certified-release-identity.v3"
     )
 
     assert identity["sbom"]["sha256"] == sha256(sbom)
@@ -370,8 +419,18 @@ def test_production_workflow_enforces_dependency_and_sbom_contract() -> None:
     assert '.[postgres,test]' not in workflow
     assert '.[postgres]' not in workflow
 
-    # Test tooling remains a separate non-production install path.
-    assert 'python -m pip install -e ".[test]"' in workflow
+    # INV-054: test/build tooling is resolved only from the
+    # cryptographically pinned build lock. The project itself is
+    # installed without dependency resolution.
+    assert "-r requirements/build.lock" in workflow
+    assert 'python -m pip install -e ".[test]"' not in workflow
+    assert "python -m pip install --no-deps --no-build-isolation -e ." in workflow
+
+    build_lock_pos = workflow.index("-r requirements/build.lock")
+    production_lock_pos = workflow.index(
+        "-r requirements/production.lock"
+    )
+    assert build_lock_pos < production_lock_pos
 
     dependency_verify = (
         "python tools/verify_production_dependencies.py"

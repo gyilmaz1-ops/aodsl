@@ -5,7 +5,7 @@ import json
 import re
 from pathlib import Path
 
-SCHEMA = "aodsl.certified-release-identity.v2"
+SCHEMA = "aodsl.certified-release-identity.v3"
 HASH_ALGORITHM = "sha256"
 WORKFLOW_PATH = ".github/workflows/production-release.yml"
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
@@ -41,6 +41,8 @@ def build_release_identity(
     certification_manifest_path = Path(certification_manifest_path).resolve()
     sbom_path = Path(sbom_path).resolve()
     dependency_lock_path = root / "requirements/production.lock"
+    build_environment_path = root / "architecture/build-environment.v1.json"
+    build_lock_path = root / "requirements/build.lock"
     workflow_path = root / WORKFLOW_PATH
 
     commit = _require(git_commit_sha, HEX40, "git commit SHA")
@@ -62,6 +64,41 @@ def build_release_identity(
         raise ValueError(f"production SBOM missing: {sbom_path}")
     if not dependency_lock_path.is_file():
         raise ValueError("production dependency lock missing")
+    if not build_environment_path.is_file():
+        raise ValueError("build environment manifest missing")
+    if not build_lock_path.is_file():
+        raise ValueError("build toolchain lock missing")
+
+    build_environment = json.loads(
+        build_environment_path.read_text(encoding="utf-8")
+    )
+
+    if build_environment.get("schema") != "aodsl.build-environment.v1":
+        raise ValueError("invalid build environment schema")
+    if build_environment.get("invariant") != "INV-054":
+        raise ValueError("invalid build environment invariant")
+
+    build_toolchain = build_environment.get("build_toolchain", {})
+    if build_toolchain.get("lock_path") != "requirements/build.lock":
+        raise ValueError("build environment lock path mismatch")
+
+    actual_build_lock_sha = _sha256_file(build_lock_path)
+    declared_build_lock_sha = build_toolchain.get("lock_sha256", "")
+    _require(
+        declared_build_lock_sha,
+        HEX64,
+        "build environment lock SHA-256",
+    )
+    if actual_build_lock_sha != declared_build_lock_sha:
+        raise ValueError("build environment lock SHA-256 mismatch")
+
+    oci = build_environment.get("oci", {})
+    oci_digest = oci.get("digest", "")
+    oci_reference = oci.get("reference", "")
+    if not re.fullmatch(r"sha256:[0-9a-f]{64}", oci_digest):
+        raise ValueError("invalid build environment OCI digest")
+    if oci_reference != f'{oci.get("image", "")}@{oci_digest}':
+        raise ValueError("build environment OCI reference mismatch")
 
     cert = json.loads(certification_manifest_path.read_text())
     source_sha = cert.get("source", {}).get("canonical_tree_sha256", "")
@@ -97,6 +134,23 @@ def build_release_identity(
             "sha256": _sha256_file(sbom_path),
             "dependency_lock_path": "requirements/production.lock",
             "dependency_lock_sha256": _sha256_file(dependency_lock_path),
+        },
+        "build_environment": {
+            "manifest_path": "architecture/build-environment.v1.json",
+            "manifest_sha256": _sha256_file(build_environment_path),
+            "oci_reference": oci_reference,
+            "oci_digest": oci_digest,
+            "platform": {
+                "os": build_environment["platform"]["os"],
+                "architecture": build_environment["platform"]["architecture"],
+            },
+            "python": {
+                "implementation": build_environment["python"]["implementation"],
+                "version": build_environment["python"]["version"],
+            },
+            "pip_version": build_environment["bootstrap"]["pip_version"],
+            "build_lock_path": "requirements/build.lock",
+            "build_lock_sha256": actual_build_lock_sha,
         },
     }
 

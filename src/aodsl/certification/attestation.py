@@ -33,8 +33,8 @@ def validate_live_evidence(e):
  pg=e.get("postgres")
  if not isinstance(pg,dict) or pg.get("id")!="CERT-PG-001" or pg.get("status")!="CERTIFIED": raise ValueError("PostgreSQL evidence invalid")
 def invariant_ids(reg):
- ids=[x.get("id") for x in reg.get("invariants",[]) if isinstance(x,dict)]; exp=[f"INV-{i:03d}" for i in range(1,54)]
- if ids!=exp: raise ValueError("architecture registry must contain exact ordered INV-001..INV-053")
+ ids=[x.get("id") for x in reg.get("invariants",[]) if isinstance(x,dict)]; exp=[f"INV-{i:03d}" for i in range(1,55)]
+ if ids!=exp: raise ValueError("architecture registry must contain exact ordered INV-001..INV-054")
  return ids
 def build_manifest(root,evidence_path):
  root=Path(root); rp=root/"architecture/invariants.v1.json"; reg=load_json(rp); ev=load_json(evidence_path)
