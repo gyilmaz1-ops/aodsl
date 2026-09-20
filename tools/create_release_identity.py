@@ -44,6 +44,7 @@ identity = build_release_identity(
     ROOT,
     artifacts[0],
     ROOT / "certification/production-certification-manifest.json",
+    DIST / "aodsl-1.0.0.cdx.json",
     git_commit_sha=commit,
     git_tag=tag,
     repository=repo,

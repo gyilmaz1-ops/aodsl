@@ -25,16 +25,31 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install AODSL
+      - name: Install hash-locked production dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[postgres,test]"
+          python -m pip install \
+            --require-hashes \
+            --only-binary=:all: \
+            -r requirements/production.lock
+
+      - name: Install AODSL and test tooling
+        run: python -m pip install -e ".[test]"
+
+      - name: Verify hash-locked production dependencies
+        run: python tools/verify_production_dependencies.py
 
       - name: Verify production attestation
         run: python tools/verify_production_attestation.py
 
       - name: Build only through production gate
         run: python tools/release_gate.py --production
+
+      - name: Create deterministic SBOM
+        run: python tools/create_sbom.py
+
+      - name: Verify deterministic SBOM
+        run: python tools/verify_sbom.py
 
       - name: Create certified release identity
         run: python tools/create_release_identity.py
@@ -47,12 +62,18 @@ jobs:
         with:
           subject-path: 'dist/aodsl-*-production-source.zip'
 
+      - name: Generate signed SBOM provenance
+        uses: actions/attest@v4
+        with:
+          subject-path: 'dist/aodsl-*.cdx.json'
+
       - name: Upload certified artifact
         uses: actions/upload-artifact@v4
         with:
           name: aodsl-certified-production
           path: |
             dist/aodsl-*-production-source.zip
+            dist/aodsl-*.cdx.json
             dist/release-manifest.json
             dist/certified-release-identity.json
             certification/production-certification-manifest.json

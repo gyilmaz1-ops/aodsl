@@ -591,6 +591,26 @@
       "tests": [
         "tests/certification/test_inv052_release_identity_binding.py"
       ]
+    },
+    {
+      "id": "INV-053",
+      "implementation": [
+        "requirements/production.lock",
+        "src/aodsl/certification/sbom.py",
+        "src/aodsl/certification/release_identity.py",
+        "tools/create_sbom.py",
+        "tools/verify_sbom.py",
+        "tools/verify_production_dependencies.py",
+        "tools/create_release_identity.py",
+        "tools/verify_release_identity.py",
+        ".github/workflows/production-release.yml",
+        "src/aodsl/certification/attestation.py",
+        "tools/architecture_freeze_gate.py"
+      ],
+      "name": "Reproducible Dependency & SBOM Integrity",
+      "tests": [
+        "tests/certification/test_inv053_sbom_integrity.py"
+      ]
     }
   ],
   "schema": "aodsl.invariant-registry.v1"

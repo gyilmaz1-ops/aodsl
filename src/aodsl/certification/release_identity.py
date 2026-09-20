@@ -5,7 +5,7 @@ import json
 import re
 from pathlib import Path
 
-SCHEMA = "aodsl.certified-release-identity.v1"
+SCHEMA = "aodsl.certified-release-identity.v2"
 HASH_ALGORITHM = "sha256"
 WORKFLOW_PATH = ".github/workflows/production-release.yml"
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
@@ -29,6 +29,7 @@ def build_release_identity(
     root: Path,
     artifact_path: Path,
     certification_manifest_path: Path,
+    sbom_path: Path,
     *,
     git_commit_sha: str,
     git_tag: str,
@@ -38,6 +39,8 @@ def build_release_identity(
     root = Path(root).resolve()
     artifact_path = Path(artifact_path).resolve()
     certification_manifest_path = Path(certification_manifest_path).resolve()
+    sbom_path = Path(sbom_path).resolve()
+    dependency_lock_path = root / "requirements/production.lock"
     workflow_path = root / WORKFLOW_PATH
 
     commit = _require(git_commit_sha, HEX40, "git commit SHA")
@@ -55,6 +58,10 @@ def build_release_identity(
         raise ValueError("production certification manifest missing")
     if not workflow_path.is_file():
         raise ValueError(f"release workflow missing: {WORKFLOW_PATH}")
+    if not sbom_path.is_file():
+        raise ValueError(f"production SBOM missing: {sbom_path}")
+    if not dependency_lock_path.is_file():
+        raise ValueError("production dependency lock missing")
 
     cert = json.loads(certification_manifest_path.read_text())
     source_sha = cert.get("source", {}).get("canonical_tree_sha256", "")
@@ -83,6 +90,14 @@ def build_release_identity(
             "sha256": artifact_sha,
             "provenance_subject_digest": {"sha256": artifact_sha},
         },
+        "sbom": {
+            "path": f"dist/{sbom_path.name}",
+            "format": "CycloneDX",
+            "spec_version": "1.6",
+            "sha256": _sha256_file(sbom_path),
+            "dependency_lock_path": "requirements/production.lock",
+            "dependency_lock_sha256": _sha256_file(dependency_lock_path),
+        },
     }
 
 
@@ -91,6 +106,7 @@ def verify_release_identity(
     identity_path: Path,
     artifact_path: Path,
     certification_manifest_path: Path,
+    sbom_path: Path,
     *,
     git_commit_sha: str,
     git_tag: str,
@@ -103,6 +119,7 @@ def verify_release_identity(
             root,
             artifact_path,
             certification_manifest_path,
+            sbom_path,
             git_commit_sha=git_commit_sha,
             git_tag=git_tag,
             repository=repository,

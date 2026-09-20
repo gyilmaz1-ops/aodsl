@@ -4,7 +4,7 @@ from pathlib import Path
 SCHEMA="aodsl.production-certification.v1"; HASH_ALGORITHM="sha256"
 EXCLUDED_DIRS={".git",".pytest_cache","__pycache__",".mypy_cache",".ruff_cache",".venv","venv","dist","build"}
 EXCLUDED_FILES={"certification/production-certification-manifest.json","certification/production-certification-attestation.json","certification/evidence/live-certification-status.json"}
-INCLUDED_ROOTS=("src","tests","tools","architecture","deploy","examples","editors")
+INCLUDED_ROOTS=("src","tests","tools","architecture","deploy","examples","editors","requirements")
 INCLUDED_TOP_LEVEL=("pyproject.toml",)
 def canonical_json_bytes(v): return json.dumps(v,sort_keys=True,separators=(",",":"),ensure_ascii=False).encode()
 def sha256_bytes(b): return hashlib.sha256(b).hexdigest()
@@ -33,8 +33,8 @@ def validate_live_evidence(e):
  pg=e.get("postgres")
  if not isinstance(pg,dict) or pg.get("id")!="CERT-PG-001" or pg.get("status")!="CERTIFIED": raise ValueError("PostgreSQL evidence invalid")
 def invariant_ids(reg):
- ids=[x.get("id") for x in reg.get("invariants",[]) if isinstance(x,dict)]; exp=[f"INV-{i:03d}" for i in range(1,53)]
- if ids!=exp: raise ValueError("architecture registry must contain exact ordered INV-001..INV-052")
+ ids=[x.get("id") for x in reg.get("invariants",[]) if isinstance(x,dict)]; exp=[f"INV-{i:03d}" for i in range(1,54)]
+ if ids!=exp: raise ValueError("architecture registry must contain exact ordered INV-001..INV-053")
  return ids
 def build_manifest(root,evidence_path):
  root=Path(root); rp=root/"architecture/invariants.v1.json"; reg=load_json(rp); ev=load_json(evidence_path)
