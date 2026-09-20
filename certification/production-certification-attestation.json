@@ -1,6 +1,6 @@
 {
   "hash_algorithm": "sha256",
-  "manifest_sha256": "567ccbdd1b8ba0536ee0ed64b82840362692b93e045c95e5ba44b972b7db9253",
+  "manifest_sha256": "f032f169a094cde3fe4e6d577de5dd0ac17cb7b6a855b1ecdf6dd358fe6805c4",
   "schema": "aodsl.production-attestation.v1",
   "verification": "FAIL_CLOSED"
 }

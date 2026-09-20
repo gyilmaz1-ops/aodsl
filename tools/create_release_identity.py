@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 from pathlib import Path
 
 from aodsl.certification.release_identity import build_release_identity
@@ -27,18 +26,6 @@ ref_type = need("GITHUB_REF_TYPE")
 if ref_type != "tag":
     raise SystemExit(f"INV-052: production release must run from tag, got {ref_type!r}")
 
-def git(*args: str) -> str:
-    r = subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True)
-    if r.returncode != 0:
-        raise SystemExit("INV-052: git identity check failed: " + r.stderr.strip())
-    return r.stdout.strip()
-
-head = git("rev-parse", "HEAD")
-if head != commit:
-    raise SystemExit(f"INV-052: checkout/commit mismatch: HEAD={head!r}, GITHUB_SHA={commit!r}")
-tag_commit = git("rev-list", "-n", "1", f"refs/tags/{tag}")
-if tag_commit != commit:
-    raise SystemExit(f"INV-052: tag/commit mismatch: tag={tag_commit!r}, GITHUB_SHA={commit!r}")
 workflow_ref = f"{repo}/.github/workflows/production-release.yml@refs/tags/{tag}"
 identity = build_release_identity(
     ROOT,

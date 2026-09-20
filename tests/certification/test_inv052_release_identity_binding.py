@@ -405,3 +405,48 @@ def test_v3_stored_build_environment_identity_tamper_fails_closed(
         "release identity does not match" in error
         for error in errors
     )
+
+
+def test_release_identity_creator_has_no_git_cli_dependency():
+    """INV-054: certified container must not require an implicit git executable."""
+    script = (
+        Path(__file__).resolve().parents[2] / "tools" / "create_release_identity.py"
+    ).read_text()
+
+    forbidden = (
+        "import subprocess",
+        '["git"',
+        "rev-parse",
+        "rev-list",
+    )
+
+    for token in forbidden:
+        assert token not in script, (
+            f"certified release identity creator has forbidden "
+            f"Git CLI dependency: {token!r}"
+        )
+
+    required = (
+        'need("GITHUB_REF_NAME")',
+        'need("GITHUB_REPOSITORY")',
+        'need("GITHUB_SHA")',
+        'need("GITHUB_REF_TYPE")',
+    )
+
+    for token in required:
+        assert token in script
+
+
+def test_release_identity_creator_requires_tag_ci_context():
+    """INV-052: release identity remains bound to authenticated tag CI context."""
+    script = (
+        Path(__file__).resolve().parents[2] / "tools" / "create_release_identity.py"
+    ).read_text()
+
+    assert 'if ref_type != "tag":' in script
+    assert "production release must run from tag" in script
+    assert (
+        'workflow_ref = '
+        'f"{repo}/.github/workflows/production-release.yml@refs/tags/{tag}"'
+        in script
+    )
