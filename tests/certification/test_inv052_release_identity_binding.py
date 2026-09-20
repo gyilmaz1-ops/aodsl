@@ -1,3 +1,4 @@
+import hashlib
 import json
 from pathlib import Path
 
@@ -100,6 +101,36 @@ def fixture(tmp_path: Path):
     artifact = tmp_path / "dist/aodsl-1.0.0-production-source.zip"
     artifact.write_bytes(b"artifact")
 
+    reproducibility = tmp_path / "dist/reproducibility-manifest.json"
+    reproducibility.write_text(
+        json.dumps(
+            {
+                "schema": "aodsl.reproducible-release-artifact.v1",
+                "invariant": "INV-055",
+                "comparison": {
+                    "algorithm": "sha256-and-byte-equality",
+                    "independent_builds": 2,
+                    "result": "IDENTICAL",
+                },
+                "artifact": {
+                    "path": "dist/aodsl-1.0.0-production-source.zip",
+                    "sha256": hashlib.sha256(
+                        artifact.read_bytes()
+                    ).hexdigest(),
+                },
+                "sbom": {
+                    "path": "dist/aodsl-1.0.0.cdx.json",
+                    "sha256": hashlib.sha256(
+                        sbom.read_bytes()
+                    ).hexdigest(),
+                },
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
     (tmp_path / "certification").mkdir()
     manifest = (
         tmp_path
@@ -115,17 +146,18 @@ def fixture(tmp_path: Path):
         )
     )
 
-    return artifact, manifest, sbom
+    return artifact, manifest, sbom, reproducibility
 
 
 def build(tmp_path):
-    artifact, manifest, sbom = fixture(tmp_path)
+    artifact, manifest, sbom, reproducibility = fixture(tmp_path)
 
     identity = build_release_identity(
         tmp_path,
         artifact,
         manifest,
         sbom,
+        reproducibility,
         git_commit_sha=COMMIT,
         git_tag=TAG,
         repository=REPO,
@@ -135,7 +167,7 @@ def build(tmp_path):
     identity_path = tmp_path / "dist/certified-release-identity.json"
     identity_path.write_text(json.dumps(identity))
 
-    return artifact, manifest, sbom, identity_path, identity
+    return artifact, manifest, sbom, reproducibility, identity_path, identity
 
 
 def verify(
@@ -143,6 +175,7 @@ def verify(
     artifact,
     manifest,
     sbom,
+    reproducibility,
     identity_path,
     **overrides,
 ):
@@ -160,12 +193,13 @@ def verify(
         artifact,
         manifest,
         sbom,
+        reproducibility,
         **args,
     )
 
 
 def test_binds_certification_commit_tag_workflow_and_artifact(tmp_path):
-    artifact, manifest, sbom, identity_path, identity = build(tmp_path)
+    artifact, manifest, sbom, reproducibility, identity_path, identity = build(tmp_path)
 
     assert identity["certification"]["source_tree_sha256"] == SOURCE
     assert identity["git"] == {
@@ -182,12 +216,13 @@ def test_binds_certification_commit_tag_workflow_and_artifact(tmp_path):
         artifact,
         manifest,
         sbom,
+        reproducibility,
         identity_path,
     ) == []
 
 
 def test_artifact_tamper_fails_closed(tmp_path):
-    artifact, manifest, sbom, identity_path, _ = build(tmp_path)
+    artifact, manifest, sbom, reproducibility, identity_path, _ = build(tmp_path)
 
     artifact.write_bytes(b"tampered")
 
@@ -196,18 +231,20 @@ def test_artifact_tamper_fails_closed(tmp_path):
         artifact,
         manifest,
         sbom,
+        reproducibility,
         identity_path,
     )
 
 
 def test_commit_or_tag_mismatch_fails_closed(tmp_path):
-    artifact, manifest, sbom, identity_path, _ = build(tmp_path)
+    artifact, manifest, sbom, reproducibility, identity_path, _ = build(tmp_path)
 
     assert verify(
         tmp_path,
         artifact,
         manifest,
         sbom,
+        reproducibility,
         identity_path,
         git_commit_sha="c" * 40,
     )
@@ -217,6 +254,7 @@ def test_commit_or_tag_mismatch_fails_closed(tmp_path):
         artifact,
         manifest,
         sbom,
+        reproducibility,
         identity_path,
         git_tag="v1.2.4",
         workflow_ref=(
@@ -227,7 +265,7 @@ def test_commit_or_tag_mismatch_fails_closed(tmp_path):
 
 
 def test_workflow_content_or_repository_mismatch_fails_closed(tmp_path):
-    artifact, manifest, sbom, identity_path, _ = build(tmp_path)
+    artifact, manifest, sbom, reproducibility, identity_path, _ = build(tmp_path)
 
     (tmp_path / ".github/workflows/production-release.yml").write_text(
         "name: tampered\n"
@@ -238,6 +276,7 @@ def test_workflow_content_or_repository_mismatch_fails_closed(tmp_path):
         artifact,
         manifest,
         sbom,
+        reproducibility,
         identity_path,
     )
 
@@ -250,6 +289,7 @@ def test_workflow_content_or_repository_mismatch_fails_closed(tmp_path):
         artifact,
         manifest,
         sbom,
+        reproducibility,
         identity_path,
         repository="other/aodsl",
         workflow_ref=(
@@ -259,8 +299,8 @@ def test_workflow_content_or_repository_mismatch_fails_closed(tmp_path):
     )
 
 
-def test_v3_binds_build_environment_manifest_and_lock(tmp_path):
-    artifact, manifest, sbom, identity_path, identity = build(tmp_path)
+def test_v4_binds_build_environment_manifest_and_lock(tmp_path):
+    artifact, manifest, sbom, reproducibility, identity_path, identity = build(tmp_path)
 
     build_environment = (
         tmp_path / "architecture/build-environment.v1.json"
@@ -269,7 +309,7 @@ def test_v3_binds_build_environment_manifest_and_lock(tmp_path):
 
     import hashlib
 
-    assert identity["schema"] == "aodsl.certified-release-identity.v3"
+    assert identity["schema"] == "aodsl.certified-release-identity.v4"
     assert (
         identity["build_environment"]["manifest_sha256"]
         == hashlib.sha256(build_environment.read_bytes()).hexdigest()
@@ -290,12 +330,13 @@ def test_v3_binds_build_environment_manifest_and_lock(tmp_path):
         artifact,
         manifest,
         sbom,
+        reproducibility,
         identity_path,
     ) == []
 
 
-def test_v3_build_lock_tamper_fails_closed(tmp_path):
-    artifact, manifest, sbom, identity_path, _ = build(tmp_path)
+def test_v4_build_lock_tamper_fails_closed(tmp_path):
+    artifact, manifest, sbom, reproducibility, identity_path, _ = build(tmp_path)
 
     build_lock = tmp_path / "requirements/build.lock"
     build_lock.write_bytes(
@@ -307,6 +348,7 @@ def test_v3_build_lock_tamper_fails_closed(tmp_path):
         artifact,
         manifest,
         sbom,
+        reproducibility,
         identity_path,
     )
 
@@ -317,8 +359,8 @@ def test_v3_build_lock_tamper_fails_closed(tmp_path):
     )
 
 
-def test_v3_build_environment_manifest_tamper_fails_closed(tmp_path):
-    artifact, manifest, sbom, identity_path, _ = build(tmp_path)
+def test_v4_build_environment_manifest_tamper_fails_closed(tmp_path):
+    artifact, manifest, sbom, reproducibility, identity_path, _ = build(tmp_path)
 
     env_path = (
         tmp_path / "architecture/build-environment.v1.json"
@@ -339,6 +381,7 @@ def test_v3_build_environment_manifest_tamper_fails_closed(tmp_path):
         artifact,
         manifest,
         sbom,
+        reproducibility,
         identity_path,
     )
 
@@ -349,8 +392,8 @@ def test_v3_build_environment_manifest_tamper_fails_closed(tmp_path):
     )
 
 
-def test_v3_oci_reference_digest_inconsistency_fails_closed(tmp_path):
-    artifact, manifest, sbom, identity_path, _ = build(tmp_path)
+def test_v4_oci_reference_digest_inconsistency_fails_closed(tmp_path):
+    artifact, manifest, sbom, reproducibility, identity_path, _ = build(tmp_path)
 
     env_path = (
         tmp_path / "architecture/build-environment.v1.json"
@@ -371,6 +414,7 @@ def test_v3_oci_reference_digest_inconsistency_fails_closed(tmp_path):
         artifact,
         manifest,
         sbom,
+        reproducibility,
         identity_path,
     )
 
@@ -381,10 +425,10 @@ def test_v3_oci_reference_digest_inconsistency_fails_closed(tmp_path):
     )
 
 
-def test_v3_stored_build_environment_identity_tamper_fails_closed(
+def test_v4_stored_build_environment_identity_tamper_fails_closed(
     tmp_path,
 ):
-    artifact, manifest, sbom, identity_path, identity = build(tmp_path)
+    artifact, manifest, sbom, reproducibility, identity_path, identity = build(tmp_path)
 
     identity["build_environment"]["pip_version"] = "26.2.1"
     identity_path.write_text(
@@ -397,6 +441,7 @@ def test_v3_stored_build_environment_identity_tamper_fails_closed(
         artifact,
         manifest,
         sbom,
+        reproducibility,
         identity_path,
     )
 
@@ -449,4 +494,274 @@ def test_release_identity_creator_requires_tag_ci_context():
         'workflow_ref = '
         'f"{repo}/.github/workflows/production-release.yml@refs/tags/{tag}"'
         in script
+    )
+
+
+def _rewrite_reproducibility(path: Path, mutate) -> None:
+    data = json.loads(path.read_text(encoding="utf-8"))
+    mutate(data)
+    path.write_text(
+        json.dumps(data, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
+def test_v4_binds_reproducibility_manifest_and_cross_links(tmp_path):
+    (
+        artifact,
+        manifest,
+        sbom,
+        reproducibility,
+        identity_path,
+        identity,
+    ) = build(tmp_path)
+
+    block = identity["reproducibility"]
+
+    assert block["manifest_path"] == "dist/reproducibility-manifest.json"
+    assert block["manifest_sha256"] == hashlib.sha256(
+        reproducibility.read_bytes()
+    ).hexdigest()
+    assert block["schema"] == "aodsl.reproducible-release-artifact.v1"
+    assert block["invariant"] == "INV-055"
+    assert block["comparison_algorithm"] == "sha256-and-byte-equality"
+    assert block["independent_builds"] == 2
+    assert block["result"] == "IDENTICAL"
+    assert block["artifact_sha256"] == identity["artifact"]["sha256"]
+    assert block["sbom_sha256"] == identity["sbom"]["sha256"]
+
+    assert verify(
+        tmp_path,
+        artifact,
+        manifest,
+        sbom,
+        reproducibility,
+        identity_path,
+    ) == []
+
+
+def test_v4_noncanonical_reproducibility_path_fails_closed(tmp_path):
+    artifact, manifest, sbom, reproducibility = fixture(tmp_path)
+
+    alternate = tmp_path / "dist/alternate-reproducibility.json"
+    alternate.write_bytes(reproducibility.read_bytes())
+
+    try:
+        build_release_identity(
+            tmp_path,
+            artifact,
+            manifest,
+            sbom,
+            alternate,
+            git_commit_sha=COMMIT,
+            git_tag=TAG,
+            repository=REPO,
+            workflow_ref=WORKFLOW_REF,
+        )
+    except ValueError as exc:
+        assert str(exc) == "reproducibility manifest path mismatch"
+    else:
+        raise AssertionError(
+            "noncanonical reproducibility path was accepted"
+        )
+
+
+def test_v4_non_object_reproducibility_manifest_fails_closed(tmp_path):
+    (
+        artifact,
+        manifest,
+        sbom,
+        reproducibility,
+        identity_path,
+        _,
+    ) = build(tmp_path)
+
+    reproducibility.write_text(
+        json.dumps(["not", "an", "object"]) + "\n",
+        encoding="utf-8",
+    )
+
+    errors = verify(
+        tmp_path,
+        artifact,
+        manifest,
+        sbom,
+        reproducibility,
+        identity_path,
+    )
+
+    assert errors
+    assert any(
+        "reproducibility manifest must be a JSON object" in error
+        for error in errors
+    )
+
+
+def test_v4_reproducibility_result_fails_closed(tmp_path):
+    (
+        artifact,
+        manifest,
+        sbom,
+        reproducibility,
+        identity_path,
+        _,
+    ) = build(tmp_path)
+
+    _rewrite_reproducibility(
+        reproducibility,
+        lambda data: data["comparison"].__setitem__(
+            "result",
+            "NOT_IDENTICAL",
+        ),
+    )
+
+    errors = verify(
+        tmp_path,
+        artifact,
+        manifest,
+        sbom,
+        reproducibility,
+        identity_path,
+    )
+
+    assert errors
+    assert any(
+        "reproducibility result is not IDENTICAL" in error
+        for error in errors
+    )
+
+
+def test_v4_reproducibility_build_count_fails_closed(tmp_path):
+    (
+        artifact,
+        manifest,
+        sbom,
+        reproducibility,
+        identity_path,
+        _,
+    ) = build(tmp_path)
+
+    _rewrite_reproducibility(
+        reproducibility,
+        lambda data: data["comparison"].__setitem__(
+            "independent_builds",
+            1,
+        ),
+    )
+
+    errors = verify(
+        tmp_path,
+        artifact,
+        manifest,
+        sbom,
+        reproducibility,
+        identity_path,
+    )
+
+    assert errors
+    assert any(
+        "invalid reproducibility independent build count" in error
+        for error in errors
+    )
+
+
+def test_v4_reproducibility_artifact_cross_link_fails_closed(tmp_path):
+    (
+        artifact,
+        manifest,
+        sbom,
+        reproducibility,
+        identity_path,
+        _,
+    ) = build(tmp_path)
+
+    _rewrite_reproducibility(
+        reproducibility,
+        lambda data: data["artifact"].__setitem__(
+            "sha256",
+            "f" * 64,
+        ),
+    )
+
+    errors = verify(
+        tmp_path,
+        artifact,
+        manifest,
+        sbom,
+        reproducibility,
+        identity_path,
+    )
+
+    assert errors
+    assert any(
+        "reproducibility artifact SHA-256 mismatch" in error
+        for error in errors
+    )
+
+
+def test_v4_reproducibility_sbom_cross_link_fails_closed(tmp_path):
+    (
+        artifact,
+        manifest,
+        sbom,
+        reproducibility,
+        identity_path,
+        _,
+    ) = build(tmp_path)
+
+    _rewrite_reproducibility(
+        reproducibility,
+        lambda data: data["sbom"].__setitem__(
+            "sha256",
+            "f" * 64,
+        ),
+    )
+
+    errors = verify(
+        tmp_path,
+        artifact,
+        manifest,
+        sbom,
+        reproducibility,
+        identity_path,
+    )
+
+    assert errors
+    assert any(
+        "reproducibility SBOM SHA-256 mismatch" in error
+        for error in errors
+    )
+
+
+def test_v4_stored_reproducibility_identity_tamper_fails_closed(
+    tmp_path,
+):
+    (
+        artifact,
+        manifest,
+        sbom,
+        reproducibility,
+        identity_path,
+        identity,
+    ) = build(tmp_path)
+
+    identity["reproducibility"]["result"] = "NOT_IDENTICAL"
+    identity_path.write_text(
+        json.dumps(identity),
+        encoding="utf-8",
+    )
+
+    errors = verify(
+        tmp_path,
+        artifact,
+        manifest,
+        sbom,
+        reproducibility,
+        identity_path,
+    )
+
+    assert errors
+    assert any(
+        "release identity does not match" in error
+        for error in errors
     )

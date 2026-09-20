@@ -5,7 +5,7 @@ import json
 import re
 from pathlib import Path
 
-SCHEMA = "aodsl.certified-release-identity.v3"
+SCHEMA = "aodsl.certified-release-identity.v4"
 HASH_ALGORITHM = "sha256"
 WORKFLOW_PATH = ".github/workflows/production-release.yml"
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
@@ -30,6 +30,7 @@ def build_release_identity(
     artifact_path: Path,
     certification_manifest_path: Path,
     sbom_path: Path,
+    reproducibility_manifest_path: Path,
     *,
     git_commit_sha: str,
     git_tag: str,
@@ -40,6 +41,18 @@ def build_release_identity(
     artifact_path = Path(artifact_path).resolve()
     certification_manifest_path = Path(certification_manifest_path).resolve()
     sbom_path = Path(sbom_path).resolve()
+    reproducibility_manifest_path = Path(
+        reproducibility_manifest_path
+    ).resolve()
+    expected_reproducibility_manifest_path = (
+        root / "dist/reproducibility-manifest.json"
+    ).resolve()
+    if (
+        reproducibility_manifest_path
+        != expected_reproducibility_manifest_path
+    ):
+        raise ValueError("reproducibility manifest path mismatch")
+
     dependency_lock_path = root / "requirements/production.lock"
     build_environment_path = root / "architecture/build-environment.v1.json"
     build_lock_path = root / "requirements/build.lock"
@@ -62,6 +75,8 @@ def build_release_identity(
         raise ValueError(f"release workflow missing: {WORKFLOW_PATH}")
     if not sbom_path.is_file():
         raise ValueError(f"production SBOM missing: {sbom_path}")
+    if not reproducibility_manifest_path.is_file():
+        raise ValueError("reproducibility manifest missing")
     if not dependency_lock_path.is_file():
         raise ValueError("production dependency lock missing")
     if not build_environment_path.is_file():
@@ -104,6 +119,44 @@ def build_release_identity(
     source_sha = cert.get("source", {}).get("canonical_tree_sha256", "")
     _require(source_sha, HEX64, "certified source SHA-256")
     artifact_sha = _sha256_file(artifact_path)
+    sbom_sha = _sha256_file(sbom_path)
+
+    reproducibility = json.loads(
+        reproducibility_manifest_path.read_text(encoding="utf-8")
+    )
+    if not isinstance(reproducibility, dict):
+        raise ValueError("reproducibility manifest must be a JSON object")
+
+    if (
+        reproducibility.get("schema")
+        != "aodsl.reproducible-release-artifact.v1"
+    ):
+        raise ValueError("invalid reproducibility manifest schema")
+    if reproducibility.get("invariant") != "INV-055":
+        raise ValueError("invalid reproducibility manifest invariant")
+
+    comparison = reproducibility.get("comparison", {})
+    if comparison.get("algorithm") != "sha256-and-byte-equality":
+        raise ValueError("invalid reproducibility comparison algorithm")
+    if comparison.get("independent_builds") != 2:
+        raise ValueError("invalid reproducibility independent build count")
+    if comparison.get("result") != "IDENTICAL":
+        raise ValueError("reproducibility result is not IDENTICAL")
+
+    expected_artifact_path = f"dist/{artifact_path.name}"
+    expected_sbom_path = f"dist/{sbom_path.name}"
+
+    reproducible_artifact = reproducibility.get("artifact", {})
+    reproducible_sbom = reproducibility.get("sbom", {})
+
+    if reproducible_artifact.get("path") != expected_artifact_path:
+        raise ValueError("reproducibility artifact path mismatch")
+    if reproducible_artifact.get("sha256") != artifact_sha:
+        raise ValueError("reproducibility artifact SHA-256 mismatch")
+    if reproducible_sbom.get("path") != expected_sbom_path:
+        raise ValueError("reproducibility SBOM path mismatch")
+    if reproducible_sbom.get("sha256") != sbom_sha:
+        raise ValueError("reproducibility SBOM SHA-256 mismatch")
 
     return {
         "schema": SCHEMA,
@@ -131,9 +184,22 @@ def build_release_identity(
             "path": f"dist/{sbom_path.name}",
             "format": "CycloneDX",
             "spec_version": "1.6",
-            "sha256": _sha256_file(sbom_path),
+            "sha256": sbom_sha,
             "dependency_lock_path": "requirements/production.lock",
             "dependency_lock_sha256": _sha256_file(dependency_lock_path),
+        },
+        "reproducibility": {
+            "manifest_path": "dist/reproducibility-manifest.json",
+            "manifest_sha256": _sha256_file(
+                reproducibility_manifest_path
+            ),
+            "schema": reproducibility["schema"],
+            "invariant": reproducibility["invariant"],
+            "comparison_algorithm": comparison["algorithm"],
+            "independent_builds": comparison["independent_builds"],
+            "result": comparison["result"],
+            "artifact_sha256": artifact_sha,
+            "sbom_sha256": sbom_sha,
         },
         "build_environment": {
             "manifest_path": "architecture/build-environment.v1.json",
@@ -161,6 +227,7 @@ def verify_release_identity(
     artifact_path: Path,
     certification_manifest_path: Path,
     sbom_path: Path,
+    reproducibility_manifest_path: Path,
     *,
     git_commit_sha: str,
     git_tag: str,
@@ -174,6 +241,7 @@ def verify_release_identity(
             artifact_path,
             certification_manifest_path,
             sbom_path,
+            reproducibility_manifest_path,
             git_commit_sha=git_commit_sha,
             git_tag=git_tag,
             repository=repository,

@@ -12,15 +12,17 @@ permissions:
   attestations: write
 
 jobs:
-  production-gate:
-    name: Certified Production Build
-    # The GitHub runner is bootstrap infrastructure only.
-    # All certified build/release commands execute inside the
-    # digest-pinned INV-054 environment below.
+  reproducible-build:
+    name: Reproducible Build ${{ matrix.build }}
     runs-on: ubuntu-latest
     container:
       image: python@sha256:47ae396f09c1303b8653019811a8498470603d7ffefc29cb07c88f1f8cb3d19f
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        build: [a, b]
+
     steps:
       - name: Checkout exact release source
         uses: actions/checkout@v4
@@ -62,6 +64,85 @@ jobs:
       - name: Verify deterministic SBOM
         run: python tools/verify_sbom.py
 
+      - name: Stage reproducibility candidate
+        run: |
+          mkdir -p repro-output
+          cp dist/aodsl-1.0.0-production-source.zip repro-output/
+          cp dist/aodsl-1.0.0.cdx.json repro-output/
+          cp dist/release-manifest.json repro-output/
+
+      - name: Upload reproducibility candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: aodsl-repro-${{ matrix.build }}
+          path: repro-output/
+          if-no-files-found: error
+          retention-days: 1
+
+  production-gate:
+    name: Certified Production Promotion
+    needs: reproducible-build
+    runs-on: ubuntu-latest
+    container:
+      image: python@sha256:47ae396f09c1303b8653019811a8498470603d7ffefc29cb07c88f1f8cb3d19f
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout exact release source
+        uses: actions/checkout@v4
+
+      - name: Verify certified build environment
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src
+        run: python tools/verify_build_environment.py
+
+      - name: Install hash-locked build and test toolchain
+        run: |
+          python -m pip install \
+            --require-hashes \
+            --only-binary=:all: \
+            -r requirements/build.lock
+
+      - name: Install hash-locked production dependencies
+        run: |
+          python -m pip install \
+            --require-hashes \
+            --only-binary=:all: \
+            -r requirements/production.lock
+
+      - name: Install AODSL without dependency resolution
+        run: python -m pip install --no-deps --no-build-isolation -e .
+
+      - name: Verify hash-locked production dependencies
+        run: python tools/verify_production_dependencies.py
+
+      - name: Download reproducibility candidate A
+        uses: actions/download-artifact@v4
+        with:
+          name: aodsl-repro-a
+          path: repro/a
+
+      - name: Download reproducibility candidate B
+        uses: actions/download-artifact@v4
+        with:
+          name: aodsl-repro-b
+          path: repro/b
+
+      - name: Compare independent release artifacts
+        run: >
+          python tools/verify_reproducible_artifacts.py
+          repro/a repro/b
+          --output dist/reproducibility-manifest.json
+
+      - name: Promote exact verified candidate A
+        run: |
+          cp repro/a/aodsl-1.0.0-production-source.zip dist/
+          cp repro/a/aodsl-1.0.0.cdx.json dist/
+          cp repro/a/release-manifest.json dist/
+
+      - name: Verify promoted deterministic SBOM
+        run: python tools/verify_sbom.py
+
       - name: Create certified release identity
         run: python tools/create_release_identity.py
 
@@ -86,6 +167,7 @@ jobs:
             dist/aodsl-*-production-source.zip
             dist/aodsl-*.cdx.json
             dist/release-manifest.json
+            dist/reproducibility-manifest.json
             dist/certified-release-identity.json
             certification/production-certification-manifest.json
             certification/production-certification-attestation.json

@@ -316,11 +316,38 @@ def test_release_identity_binds_sbom_and_lock(
 
     write_sbom(root, sbom)
 
+    reproducibility = root / "dist/reproducibility-manifest.json"
+    reproducibility.write_text(
+        json.dumps(
+            {
+                "schema": "aodsl.reproducible-release-artifact.v1",
+                "invariant": "INV-055",
+                "comparison": {
+                    "algorithm": "sha256-and-byte-equality",
+                    "independent_builds": 2,
+                    "result": "IDENTICAL",
+                },
+                "artifact": {
+                    "path": "dist/aodsl-1.0.0-production-source.zip",
+                    "sha256": sha256(artifact),
+                },
+                "sbom": {
+                    "path": "dist/aodsl-1.0.0.cdx.json",
+                    "sha256": sha256(sbom),
+                },
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
     identity = build_release_identity(
         root,
         artifact,
         cert,
         sbom,
+        reproducibility,
         git_commit_sha="b" * 40,
         git_tag="v1.0.4",
         repository="gyilmaz1-ops/aodsl",
@@ -333,7 +360,7 @@ def test_release_identity_binds_sbom_and_lock(
 
     assert (
         RELEASE_IDENTITY_SCHEMA
-        == "aodsl.certified-release-identity.v3"
+        == "aodsl.certified-release-identity.v4"
     )
 
     assert identity["sbom"]["sha256"] == sha256(sbom)
@@ -363,6 +390,7 @@ def test_release_identity_binds_sbom_and_lock(
         artifact,
         cert,
         sbom,
+        reproducibility,
         git_commit_sha="b" * 40,
         git_tag="v1.0.4",
         repository="gyilmaz1-ops/aodsl",
@@ -383,6 +411,7 @@ def test_release_identity_binds_sbom_and_lock(
         artifact,
         cert,
         sbom,
+        reproducibility,
         git_commit_sha="b" * 40,
         git_tag="v1.0.4",
         repository="gyilmaz1-ops/aodsl",
@@ -395,8 +424,7 @@ def test_release_identity_binds_sbom_and_lock(
 
     assert errors
     assert (
-        "release identity does not match "
-        "certification/git/workflow/artifact"
+        "reproducibility SBOM SHA-256 mismatch"
         in errors
     )
 
@@ -408,55 +436,101 @@ def test_production_workflow_enforces_dependency_and_sbom_contract() -> None:
     )
     workflow = workflow_path.read_text(encoding="utf-8")
 
-    # Production dependencies must come only from the
-    # cryptographically pinned lock.
-    assert "--require-hashes" in workflow
-    assert "--only-binary=:all:" in workflow
-    assert "-r requirements/production.lock" in workflow
+    build_marker = "  reproducible-build:\n"
+    final_marker = "  production-gate:\n"
 
-    # Production dependency resolution must not fall back to
-    # the range-based postgres optional dependency.
-    assert '.[postgres,test]' not in workflow
-    assert '.[postgres]' not in workflow
+    assert build_marker in workflow
+    assert final_marker in workflow
 
-    # INV-054: test/build tooling is resolved only from the
-    # cryptographically pinned build lock. The project itself is
-    # installed without dependency resolution.
-    assert "-r requirements/build.lock" in workflow
-    assert 'python -m pip install -e ".[test]"' not in workflow
-    assert "python -m pip install --no-deps --no-build-isolation -e ." in workflow
+    build_start = workflow.index(build_marker)
+    final_start = workflow.index(final_marker)
 
-    build_lock_pos = workflow.index("-r requirements/build.lock")
-    production_lock_pos = workflow.index(
-        "-r requirements/production.lock"
-    )
-    assert build_lock_pos < production_lock_pos
+    assert build_start < final_start
+
+    build = workflow[build_start:final_start]
+    final = workflow[final_start:]
+
+    # Both certified execution phases use the cryptographically
+    # pinned dependency contracts.
+    for block in (build, final):
+        assert "--require-hashes" in block
+        assert "--only-binary=:all:" in block
+        assert "-r requirements/build.lock" in block
+        assert "-r requirements/production.lock" in block
+
+        assert '.[postgres,test]' not in block
+        assert '.[postgres]' not in block
+
+        assert (
+            'python -m pip install -e ".[test]"'
+            not in block
+        )
+        assert (
+            "python -m pip install "
+            "--no-deps --no-build-isolation -e ."
+            in block
+        )
+
+        assert (
+            block.index("-r requirements/build.lock")
+            < block.index("-r requirements/production.lock")
+        )
 
     dependency_verify = (
         "python tools/verify_production_dependencies.py"
     )
     sbom_create = "python tools/create_sbom.py"
     sbom_verify = "python tools/verify_sbom.py"
-    identity_create = "python tools/create_release_identity.py"
-    identity_verify = "python tools/verify_release_identity.py"
-    sbom_subject = "subject-path: 'dist/aodsl-*.cdx.json'"
-    upload = "uses: actions/upload-artifact@v4"
+    candidate_upload = "name: aodsl-repro-${{ matrix.build }}"
 
     for required in (
         dependency_verify,
         sbom_create,
         sbom_verify,
+        candidate_upload,
+    ):
+        assert required in build
+
+    # Candidate bytes must be generated and verified before
+    # they cross the artifact boundary.
+    assert (
+        build.index(dependency_verify)
+        < build.index(sbom_create)
+        < build.index(sbom_verify)
+        < build.index(candidate_upload)
+    )
+
+    compare = "python tools/verify_reproducible_artifacts.py"
+    promoted_sbom_verify = "python tools/verify_sbom.py"
+    identity_create = "python tools/create_release_identity.py"
+    identity_verify = "python tools/verify_release_identity.py"
+    sbom_subject = "subject-path: 'dist/aodsl-*.cdx.json'"
+    certified_upload = "name: aodsl-certified-production"
+
+    for required in (
+        dependency_verify,
+        compare,
+        promoted_sbom_verify,
         identity_create,
         identity_verify,
         sbom_subject,
-        upload,
+        certified_upload,
     ):
-        assert required in workflow
+        assert required in final
 
-    # Enforce the release trust-chain ordering.
-    assert workflow.index(dependency_verify) < workflow.index(sbom_create)
-    assert workflow.index(sbom_create) < workflow.index(sbom_verify)
-    assert workflow.index(sbom_verify) < workflow.index(identity_create)
-    assert workflow.index(identity_create) < workflow.index(identity_verify)
-    assert workflow.index(identity_verify) < workflow.index(sbom_subject)
-    assert workflow.index(sbom_subject) < workflow.index(upload)
+    # The final gate must consume the already-built candidate.
+    # It may verify the promoted SBOM, but must not regenerate it.
+    assert "python tools/create_sbom.py" not in final
+    assert "python tools/release_gate.py --production" not in final
+
+    # Final trust chain:
+    # compare -> verify promoted SBOM -> bind identity ->
+    # verify identity -> attest SBOM -> certified upload.
+    assert (
+        final.index(compare)
+        < final.index(promoted_sbom_verify)
+        < final.index(identity_create)
+        < final.index(identity_verify)
+        < final.index(sbom_subject)
+        < final.index(certified_upload)
+    )
