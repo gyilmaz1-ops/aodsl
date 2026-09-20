@@ -36,6 +36,12 @@ jobs:
       - name: Build only through production gate
         run: python tools/release_gate.py --production
 
+      - name: Create certified release identity
+        run: python tools/create_release_identity.py
+
+      - name: Verify certified release identity
+        run: python tools/verify_release_identity.py
+
       - name: Generate signed build provenance
         uses: actions/attest@v4
         with:
@@ -48,6 +54,7 @@ jobs:
           path: |
             dist/aodsl-*-production-source.zip
             dist/release-manifest.json
+            dist/certified-release-identity.json
             certification/production-certification-manifest.json
             certification/production-certification-attestation.json
             certification/evidence/live-certification-status.json
