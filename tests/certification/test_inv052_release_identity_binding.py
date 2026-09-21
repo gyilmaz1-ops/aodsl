@@ -1,7 +1,12 @@
 import hashlib
 import json
+import shutil
 from pathlib import Path
 
+from aodsl.certification.certified_bundle import (
+    BUNDLE_MANIFEST_PATH,
+    build_certified_bundle_manifest,
+)
 from aodsl.certification.sbom import write_sbom
 from aodsl.certification.release_identity import (
     build_release_identity,
@@ -146,11 +151,67 @@ def fixture(tmp_path: Path):
         )
     )
 
-    return artifact, manifest, sbom, reproducibility
+    # Remaining INV-056 certified payload/evidence files.
+    (tmp_path / "certification/evidence").mkdir(parents=True)
+
+    (tmp_path / "dist/release-manifest.json").write_text(
+        json.dumps({"release": "fixture"}, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    (
+        tmp_path
+        / "certification/production-certification-attestation.json"
+    ).write_text(
+        json.dumps({"attestation": "fixture"}, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    (
+        tmp_path
+        / "certification/evidence/live-certification-status.json"
+    ).write_text(
+        json.dumps({"status": "CERTIFIED"}, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    bundle_root = tmp_path / "bundle-stage"
+
+    from aodsl.certification.certified_bundle import (
+        REQUIRED_PAYLOAD_PATHS,
+    )
+
+    for relative in REQUIRED_PAYLOAD_PATHS:
+        source = tmp_path / relative
+        target = bundle_root / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, target)
+
+    staged_bundle = bundle_root / BUNDLE_MANIFEST_PATH
+    staged_bundle.parent.mkdir(parents=True, exist_ok=True)
+    staged_bundle.write_text(
+        json.dumps(
+            build_certified_bundle_manifest(bundle_root),
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    bundle = tmp_path / BUNDLE_MANIFEST_PATH
+    bundle.write_bytes(staged_bundle.read_bytes())
+
+    return (
+        artifact,
+        manifest,
+        sbom,
+        reproducibility,
+        bundle_root,
+        bundle,
+    )
 
 
 def build(tmp_path):
-    artifact, manifest, sbom, reproducibility = fixture(tmp_path)
+    artifact, manifest, sbom, reproducibility, bundle_root, bundle = fixture(tmp_path)
 
     identity = build_release_identity(
         tmp_path,
@@ -158,6 +219,8 @@ def build(tmp_path):
         manifest,
         sbom,
         reproducibility,
+        bundle_root,
+        bundle,
         git_commit_sha=COMMIT,
         git_tag=TAG,
         repository=REPO,
@@ -167,7 +230,16 @@ def build(tmp_path):
     identity_path = tmp_path / "dist/certified-release-identity.json"
     identity_path.write_text(json.dumps(identity))
 
-    return artifact, manifest, sbom, reproducibility, identity_path, identity
+    return (
+        artifact,
+        manifest,
+        sbom,
+        reproducibility,
+        bundle_root,
+        bundle,
+        identity_path,
+        identity,
+    )
 
 
 def verify(
@@ -176,6 +248,8 @@ def verify(
     manifest,
     sbom,
     reproducibility,
+    bundle_root,
+    bundle,
     identity_path,
     **overrides,
 ):
@@ -194,12 +268,14 @@ def verify(
         manifest,
         sbom,
         reproducibility,
+        bundle_root,
+        bundle,
         **args,
     )
 
 
 def test_binds_certification_commit_tag_workflow_and_artifact(tmp_path):
-    artifact, manifest, sbom, reproducibility, identity_path, identity = build(tmp_path)
+    artifact, manifest, sbom, reproducibility, bundle_root, bundle, identity_path, identity = build(tmp_path)
 
     assert identity["certification"]["source_tree_sha256"] == SOURCE
     assert identity["git"] == {
@@ -211,18 +287,31 @@ def test_binds_certification_commit_tag_workflow_and_artifact(tmp_path):
         == identity["artifact"]["provenance_subject_digest"]["sha256"]
     )
 
+    bundle_block = identity["certified_bundle"]
+    assert bundle_block["manifest_path"] == BUNDLE_MANIFEST_PATH
+    assert bundle_block["manifest_sha256"] == hashlib.sha256(
+        bundle.read_bytes()
+    ).hexdigest()
+    assert bundle_block["schema"] == "aodsl.certified-bundle.v1"
+    assert bundle_block["invariant"] == "INV-056"
+    assert bundle_block["hash_algorithm"] == "sha256"
+    assert bundle_block["closure_policy"] == "exact-physical-payload-set"
+    assert bundle_block["payload_count"] == 7
+
     assert verify(
         tmp_path,
         artifact,
         manifest,
         sbom,
         reproducibility,
+        bundle_root,
+        bundle,
         identity_path,
     ) == []
 
 
 def test_artifact_tamper_fails_closed(tmp_path):
-    artifact, manifest, sbom, reproducibility, identity_path, _ = build(tmp_path)
+    artifact, manifest, sbom, reproducibility, bundle_root, bundle, identity_path, _ = build(tmp_path)
 
     artifact.write_bytes(b"tampered")
 
@@ -232,12 +321,14 @@ def test_artifact_tamper_fails_closed(tmp_path):
         manifest,
         sbom,
         reproducibility,
+        bundle_root,
+        bundle,
         identity_path,
     )
 
 
 def test_commit_or_tag_mismatch_fails_closed(tmp_path):
-    artifact, manifest, sbom, reproducibility, identity_path, _ = build(tmp_path)
+    artifact, manifest, sbom, reproducibility, bundle_root, bundle, identity_path, _ = build(tmp_path)
 
     assert verify(
         tmp_path,
@@ -245,6 +336,8 @@ def test_commit_or_tag_mismatch_fails_closed(tmp_path):
         manifest,
         sbom,
         reproducibility,
+        bundle_root,
+        bundle,
         identity_path,
         git_commit_sha="c" * 40,
     )
@@ -255,6 +348,8 @@ def test_commit_or_tag_mismatch_fails_closed(tmp_path):
         manifest,
         sbom,
         reproducibility,
+        bundle_root,
+        bundle,
         identity_path,
         git_tag="v1.2.4",
         workflow_ref=(
@@ -265,7 +360,7 @@ def test_commit_or_tag_mismatch_fails_closed(tmp_path):
 
 
 def test_workflow_content_or_repository_mismatch_fails_closed(tmp_path):
-    artifact, manifest, sbom, reproducibility, identity_path, _ = build(tmp_path)
+    artifact, manifest, sbom, reproducibility, bundle_root, bundle, identity_path, _ = build(tmp_path)
 
     (tmp_path / ".github/workflows/production-release.yml").write_text(
         "name: tampered\n"
@@ -277,6 +372,8 @@ def test_workflow_content_or_repository_mismatch_fails_closed(tmp_path):
         manifest,
         sbom,
         reproducibility,
+        bundle_root,
+        bundle,
         identity_path,
     )
 
@@ -290,6 +387,8 @@ def test_workflow_content_or_repository_mismatch_fails_closed(tmp_path):
         manifest,
         sbom,
         reproducibility,
+        bundle_root,
+        bundle,
         identity_path,
         repository="other/aodsl",
         workflow_ref=(
@@ -299,8 +398,8 @@ def test_workflow_content_or_repository_mismatch_fails_closed(tmp_path):
     )
 
 
-def test_v4_binds_build_environment_manifest_and_lock(tmp_path):
-    artifact, manifest, sbom, reproducibility, identity_path, identity = build(tmp_path)
+def test_v5_binds_build_environment_manifest_and_lock(tmp_path):
+    artifact, manifest, sbom, reproducibility, bundle_root, bundle, identity_path, identity = build(tmp_path)
 
     build_environment = (
         tmp_path / "architecture/build-environment.v1.json"
@@ -309,7 +408,7 @@ def test_v4_binds_build_environment_manifest_and_lock(tmp_path):
 
     import hashlib
 
-    assert identity["schema"] == "aodsl.certified-release-identity.v4"
+    assert identity["schema"] == "aodsl.certified-release-identity.v5"
     assert (
         identity["build_environment"]["manifest_sha256"]
         == hashlib.sha256(build_environment.read_bytes()).hexdigest()
@@ -331,12 +430,14 @@ def test_v4_binds_build_environment_manifest_and_lock(tmp_path):
         manifest,
         sbom,
         reproducibility,
+        bundle_root,
+        bundle,
         identity_path,
     ) == []
 
 
-def test_v4_build_lock_tamper_fails_closed(tmp_path):
-    artifact, manifest, sbom, reproducibility, identity_path, _ = build(tmp_path)
+def test_v5_build_lock_tamper_fails_closed(tmp_path):
+    artifact, manifest, sbom, reproducibility, bundle_root, bundle, identity_path, _ = build(tmp_path)
 
     build_lock = tmp_path / "requirements/build.lock"
     build_lock.write_bytes(
@@ -349,6 +450,8 @@ def test_v4_build_lock_tamper_fails_closed(tmp_path):
         manifest,
         sbom,
         reproducibility,
+        bundle_root,
+        bundle,
         identity_path,
     )
 
@@ -359,8 +462,8 @@ def test_v4_build_lock_tamper_fails_closed(tmp_path):
     )
 
 
-def test_v4_build_environment_manifest_tamper_fails_closed(tmp_path):
-    artifact, manifest, sbom, reproducibility, identity_path, _ = build(tmp_path)
+def test_v5_build_environment_manifest_tamper_fails_closed(tmp_path):
+    artifact, manifest, sbom, reproducibility, bundle_root, bundle, identity_path, _ = build(tmp_path)
 
     env_path = (
         tmp_path / "architecture/build-environment.v1.json"
@@ -382,6 +485,8 @@ def test_v4_build_environment_manifest_tamper_fails_closed(tmp_path):
         manifest,
         sbom,
         reproducibility,
+        bundle_root,
+        bundle,
         identity_path,
     )
 
@@ -392,8 +497,8 @@ def test_v4_build_environment_manifest_tamper_fails_closed(tmp_path):
     )
 
 
-def test_v4_oci_reference_digest_inconsistency_fails_closed(tmp_path):
-    artifact, manifest, sbom, reproducibility, identity_path, _ = build(tmp_path)
+def test_v5_oci_reference_digest_inconsistency_fails_closed(tmp_path):
+    artifact, manifest, sbom, reproducibility, bundle_root, bundle, identity_path, _ = build(tmp_path)
 
     env_path = (
         tmp_path / "architecture/build-environment.v1.json"
@@ -415,6 +520,8 @@ def test_v4_oci_reference_digest_inconsistency_fails_closed(tmp_path):
         manifest,
         sbom,
         reproducibility,
+        bundle_root,
+        bundle,
         identity_path,
     )
 
@@ -425,10 +532,10 @@ def test_v4_oci_reference_digest_inconsistency_fails_closed(tmp_path):
     )
 
 
-def test_v4_stored_build_environment_identity_tamper_fails_closed(
+def test_v5_stored_build_environment_identity_tamper_fails_closed(
     tmp_path,
 ):
-    artifact, manifest, sbom, reproducibility, identity_path, identity = build(tmp_path)
+    artifact, manifest, sbom, reproducibility, bundle_root, bundle, identity_path, identity = build(tmp_path)
 
     identity["build_environment"]["pip_version"] = "26.2.1"
     identity_path.write_text(
@@ -442,6 +549,8 @@ def test_v4_stored_build_environment_identity_tamper_fails_closed(
         manifest,
         sbom,
         reproducibility,
+        bundle_root,
+        bundle,
         identity_path,
     )
 
@@ -506,12 +615,14 @@ def _rewrite_reproducibility(path: Path, mutate) -> None:
     )
 
 
-def test_v4_binds_reproducibility_manifest_and_cross_links(tmp_path):
+def test_v5_binds_reproducibility_manifest_and_cross_links(tmp_path):
     (
         artifact,
         manifest,
         sbom,
         reproducibility,
+        bundle_root,
+        bundle,
         identity_path,
         identity,
     ) = build(tmp_path)
@@ -536,12 +647,14 @@ def test_v4_binds_reproducibility_manifest_and_cross_links(tmp_path):
         manifest,
         sbom,
         reproducibility,
+        bundle_root,
+        bundle,
         identity_path,
     ) == []
 
 
-def test_v4_noncanonical_reproducibility_path_fails_closed(tmp_path):
-    artifact, manifest, sbom, reproducibility = fixture(tmp_path)
+def test_v5_noncanonical_reproducibility_path_fails_closed(tmp_path):
+    artifact, manifest, sbom, reproducibility, bundle_root, bundle = fixture(tmp_path)
 
     alternate = tmp_path / "dist/alternate-reproducibility.json"
     alternate.write_bytes(reproducibility.read_bytes())
@@ -553,6 +666,8 @@ def test_v4_noncanonical_reproducibility_path_fails_closed(tmp_path):
             manifest,
             sbom,
             alternate,
+            bundle_root,
+            bundle,
             git_commit_sha=COMMIT,
             git_tag=TAG,
             repository=REPO,
@@ -566,12 +681,14 @@ def test_v4_noncanonical_reproducibility_path_fails_closed(tmp_path):
         )
 
 
-def test_v4_non_object_reproducibility_manifest_fails_closed(tmp_path):
+def test_v5_non_object_reproducibility_manifest_fails_closed(tmp_path):
     (
         artifact,
         manifest,
         sbom,
         reproducibility,
+        bundle_root,
+        bundle,
         identity_path,
         _,
     ) = build(tmp_path)
@@ -587,6 +704,8 @@ def test_v4_non_object_reproducibility_manifest_fails_closed(tmp_path):
         manifest,
         sbom,
         reproducibility,
+        bundle_root,
+        bundle,
         identity_path,
     )
 
@@ -597,12 +716,14 @@ def test_v4_non_object_reproducibility_manifest_fails_closed(tmp_path):
     )
 
 
-def test_v4_reproducibility_result_fails_closed(tmp_path):
+def test_v5_reproducibility_result_fails_closed(tmp_path):
     (
         artifact,
         manifest,
         sbom,
         reproducibility,
+        bundle_root,
+        bundle,
         identity_path,
         _,
     ) = build(tmp_path)
@@ -621,6 +742,8 @@ def test_v4_reproducibility_result_fails_closed(tmp_path):
         manifest,
         sbom,
         reproducibility,
+        bundle_root,
+        bundle,
         identity_path,
     )
 
@@ -631,12 +754,14 @@ def test_v4_reproducibility_result_fails_closed(tmp_path):
     )
 
 
-def test_v4_reproducibility_build_count_fails_closed(tmp_path):
+def test_v5_reproducibility_build_count_fails_closed(tmp_path):
     (
         artifact,
         manifest,
         sbom,
         reproducibility,
+        bundle_root,
+        bundle,
         identity_path,
         _,
     ) = build(tmp_path)
@@ -655,6 +780,8 @@ def test_v4_reproducibility_build_count_fails_closed(tmp_path):
         manifest,
         sbom,
         reproducibility,
+        bundle_root,
+        bundle,
         identity_path,
     )
 
@@ -665,12 +792,14 @@ def test_v4_reproducibility_build_count_fails_closed(tmp_path):
     )
 
 
-def test_v4_reproducibility_artifact_cross_link_fails_closed(tmp_path):
+def test_v5_reproducibility_artifact_cross_link_fails_closed(tmp_path):
     (
         artifact,
         manifest,
         sbom,
         reproducibility,
+        bundle_root,
+        bundle,
         identity_path,
         _,
     ) = build(tmp_path)
@@ -689,6 +818,8 @@ def test_v4_reproducibility_artifact_cross_link_fails_closed(tmp_path):
         manifest,
         sbom,
         reproducibility,
+        bundle_root,
+        bundle,
         identity_path,
     )
 
@@ -699,12 +830,14 @@ def test_v4_reproducibility_artifact_cross_link_fails_closed(tmp_path):
     )
 
 
-def test_v4_reproducibility_sbom_cross_link_fails_closed(tmp_path):
+def test_v5_reproducibility_sbom_cross_link_fails_closed(tmp_path):
     (
         artifact,
         manifest,
         sbom,
         reproducibility,
+        bundle_root,
+        bundle,
         identity_path,
         _,
     ) = build(tmp_path)
@@ -723,6 +856,8 @@ def test_v4_reproducibility_sbom_cross_link_fails_closed(tmp_path):
         manifest,
         sbom,
         reproducibility,
+        bundle_root,
+        bundle,
         identity_path,
     )
 
@@ -733,7 +868,7 @@ def test_v4_reproducibility_sbom_cross_link_fails_closed(tmp_path):
     )
 
 
-def test_v4_stored_reproducibility_identity_tamper_fails_closed(
+def test_v5_stored_reproducibility_identity_tamper_fails_closed(
     tmp_path,
 ):
     (
@@ -741,6 +876,8 @@ def test_v4_stored_reproducibility_identity_tamper_fails_closed(
         manifest,
         sbom,
         reproducibility,
+        bundle_root,
+        bundle,
         identity_path,
         identity,
     ) = build(tmp_path)
@@ -757,6 +894,179 @@ def test_v4_stored_reproducibility_identity_tamper_fails_closed(
         manifest,
         sbom,
         reproducibility,
+        bundle_root,
+        bundle,
+        identity_path,
+    )
+
+    assert errors
+    assert any(
+        "release identity does not match" in error
+        for error in errors
+    )
+
+
+def test_v5_noncanonical_bundle_manifest_path_fails_closed(tmp_path):
+    artifact, manifest, sbom, reproducibility, bundle_root, bundle = fixture(tmp_path)
+
+    alternate = tmp_path / "dist/alternate-certified-bundle.json"
+    alternate.write_bytes(bundle.read_bytes())
+
+    try:
+        build_release_identity(
+            tmp_path,
+            artifact,
+            manifest,
+            sbom,
+            reproducibility,
+            bundle_root,
+            alternate,
+            git_commit_sha=COMMIT,
+            git_tag=TAG,
+            repository=REPO,
+            workflow_ref=WORKFLOW_REF,
+        )
+    except ValueError as exc:
+        assert str(exc) == "certified bundle manifest path mismatch"
+    else:
+        raise AssertionError(
+            "noncanonical certified bundle manifest path was accepted"
+        )
+
+
+def test_v5_missing_bundle_manifest_fails_closed(tmp_path):
+    (
+        artifact,
+        manifest,
+        sbom,
+        reproducibility,
+        bundle_root,
+        bundle,
+        identity_path,
+        _,
+    ) = build(tmp_path)
+
+    bundle.unlink()
+
+    errors = verify(
+        tmp_path,
+        artifact,
+        manifest,
+        sbom,
+        reproducibility,
+        bundle_root,
+        bundle,
+        identity_path,
+    )
+
+    assert errors
+    assert any(
+        "certified bundle manifest missing" in error
+        for error in errors
+    )
+
+
+def test_v5_bundle_manifest_tamper_fails_closed(tmp_path):
+    (
+        artifact,
+        manifest,
+        sbom,
+        reproducibility,
+        bundle_root,
+        bundle,
+        identity_path,
+        _,
+    ) = build(tmp_path)
+
+    data = json.loads(bundle.read_text(encoding="utf-8"))
+    data["closure"]["payload_count"] = 999
+    bundle.write_text(
+        json.dumps(data, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    errors = verify(
+        tmp_path,
+        artifact,
+        manifest,
+        sbom,
+        reproducibility,
+        bundle_root,
+        bundle,
+        identity_path,
+    )
+
+    assert errors
+    assert any(
+        "promoted certified bundle manifest differs from "
+        "physically verified staged manifest" in error
+        for error in errors
+    )
+
+
+def test_v5_bundle_payload_tamper_fails_closed(tmp_path):
+    (
+        artifact,
+        manifest,
+        sbom,
+        reproducibility,
+        bundle_root,
+        bundle,
+        identity_path,
+        _,
+    ) = build(tmp_path)
+
+    release_manifest = (
+        bundle_root / "dist/release-manifest.json"
+    )
+    release_manifest.write_bytes(
+        release_manifest.read_bytes() + b"tampered"
+    )
+
+    errors = verify(
+        tmp_path,
+        artifact,
+        manifest,
+        sbom,
+        reproducibility,
+        bundle_root,
+        bundle,
+        identity_path,
+    )
+
+    assert errors
+    assert any(
+        "certified bundle verification failed" in error
+        for error in errors
+    )
+
+
+def test_v5_stored_bundle_identity_tamper_fails_closed(tmp_path):
+    (
+        artifact,
+        manifest,
+        sbom,
+        reproducibility,
+        bundle_root,
+        bundle,
+        identity_path,
+        identity,
+    ) = build(tmp_path)
+
+    identity["certified_bundle"]["manifest_sha256"] = "f" * 64
+    identity_path.write_text(
+        json.dumps(identity),
+        encoding="utf-8",
+    )
+
+    errors = verify(
+        tmp_path,
+        artifact,
+        manifest,
+        sbom,
+        reproducibility,
+        bundle_root,
+        bundle,
         identity_path,
     )
 

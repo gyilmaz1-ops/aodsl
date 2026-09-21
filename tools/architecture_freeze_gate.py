@@ -9,7 +9,7 @@ REG = ROOT / "architecture/invariants.v1.json"
 registry = json.loads(REG.read_text())
 items = registry["invariants"]
 
-expected = [f"INV-{i:03d}" for i in range(1, 56)]
+expected = [f"INV-{i:03d}" for i in range(1, 57)]
 ids = [item["id"] for item in items]
 
 assert ids == expected, f"invariant sequence mismatch: {ids}"

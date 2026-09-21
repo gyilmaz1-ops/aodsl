@@ -2,10 +2,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 from pathlib import Path
 
 import pytest
 
+from aodsl.certification.certified_bundle import (
+    BUNDLE_MANIFEST_PATH,
+    build_certified_bundle_manifest,
+)
 from aodsl.certification.release_identity import (
     SCHEMA as RELEASE_IDENTITY_SCHEMA,
     build_release_identity,
@@ -342,12 +347,65 @@ def test_release_identity_binds_sbom_and_lock(
         encoding="utf-8",
     )
 
+    (root / "certification/evidence").mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    (root / "dist/release-manifest.json").write_text(
+        json.dumps({"release": "fixture"}, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    (
+        root
+        / "certification/production-certification-attestation.json"
+    ).write_text(
+        json.dumps({"attestation": "fixture"}, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    (
+        root
+        / "certification/evidence/live-certification-status.json"
+    ).write_text(
+        json.dumps({"status": "CERTIFIED"}, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    bundle_root = root / "bundle-stage"
+
+    from aodsl.certification.certified_bundle import (
+        REQUIRED_PAYLOAD_PATHS,
+    )
+
+    for relative in REQUIRED_PAYLOAD_PATHS:
+        source = root / relative
+        target = bundle_root / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, target)
+
+    staged_bundle = bundle_root / BUNDLE_MANIFEST_PATH
+    staged_bundle.parent.mkdir(parents=True, exist_ok=True)
+    staged_bundle.write_text(
+        json.dumps(
+            build_certified_bundle_manifest(bundle_root),
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    bundle = root / BUNDLE_MANIFEST_PATH
+    bundle.write_bytes(staged_bundle.read_bytes())
+
     identity = build_release_identity(
         root,
         artifact,
         cert,
         sbom,
         reproducibility,
+        bundle_root,
+        bundle,
         git_commit_sha="b" * 40,
         git_tag="v1.0.4",
         repository="gyilmaz1-ops/aodsl",
@@ -360,7 +418,7 @@ def test_release_identity_binds_sbom_and_lock(
 
     assert (
         RELEASE_IDENTITY_SCHEMA
-        == "aodsl.certified-release-identity.v4"
+        == "aodsl.certified-release-identity.v5"
     )
 
     assert identity["sbom"]["sha256"] == sha256(sbom)
@@ -391,6 +449,8 @@ def test_release_identity_binds_sbom_and_lock(
         cert,
         sbom,
         reproducibility,
+        bundle_root,
+        bundle,
         git_commit_sha="b" * 40,
         git_tag="v1.0.4",
         repository="gyilmaz1-ops/aodsl",
@@ -412,6 +472,8 @@ def test_release_identity_binds_sbom_and_lock(
         cert,
         sbom,
         reproducibility,
+        bundle_root,
+        bundle,
         git_commit_sha="b" * 40,
         git_tag="v1.0.4",
         repository="gyilmaz1-ops/aodsl",

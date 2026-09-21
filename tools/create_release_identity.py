@@ -33,6 +33,8 @@ identity = build_release_identity(
     ROOT / "certification/production-certification-manifest.json",
     DIST / "aodsl-1.0.0.cdx.json",
     DIST / "reproducibility-manifest.json",
+    DIST / "certified-bundle-stage",
+    DIST / "certified-bundle-manifest.json",
     git_commit_sha=commit,
     git_tag=tag,
     repository=repo,

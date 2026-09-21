@@ -143,6 +143,34 @@ jobs:
       - name: Verify promoted deterministic SBOM
         run: python tools/verify_sbom.py
 
+      - name: Stage exact certified bundle payload
+        run: |
+          rm -rf dist/certified-bundle-stage
+          mkdir -p dist/certified-bundle-stage/dist
+          mkdir -p dist/certified-bundle-stage/certification/evidence
+          cp dist/aodsl-1.0.0-production-source.zip dist/certified-bundle-stage/dist/aodsl-1.0.0-production-source.zip
+          cp dist/aodsl-1.0.0.cdx.json dist/certified-bundle-stage/dist/aodsl-1.0.0.cdx.json
+          cp dist/release-manifest.json dist/certified-bundle-stage/dist/release-manifest.json
+          cp dist/reproducibility-manifest.json dist/certified-bundle-stage/dist/reproducibility-manifest.json
+          cp certification/production-certification-manifest.json dist/certified-bundle-stage/certification/production-certification-manifest.json
+          cp certification/production-certification-attestation.json dist/certified-bundle-stage/certification/production-certification-attestation.json
+          cp certification/evidence/live-certification-status.json dist/certified-bundle-stage/certification/evidence/live-certification-status.json
+
+      - name: Create physical certified bundle manifest
+        run: >
+          python tools/create_certified_bundle_manifest.py
+          --bundle-root dist/certified-bundle-stage
+
+      - name: Verify physical certified bundle closure
+        run: >
+          python tools/verify_certified_bundle_manifest.py
+          --bundle-root dist/certified-bundle-stage
+
+      - name: Promote verified certified bundle manifest
+        run: |
+          cp dist/certified-bundle-stage/dist/certified-bundle-manifest.json dist/certified-bundle-manifest.json
+          cmp dist/certified-bundle-stage/dist/certified-bundle-manifest.json dist/certified-bundle-manifest.json
+
       - name: Create certified release identity
         run: python tools/create_release_identity.py
 
@@ -168,6 +196,7 @@ jobs:
             dist/aodsl-*.cdx.json
             dist/release-manifest.json
             dist/reproducibility-manifest.json
+            dist/certified-bundle-manifest.json
             dist/certified-release-identity.json
             certification/production-certification-manifest.json
             certification/production-certification-attestation.json

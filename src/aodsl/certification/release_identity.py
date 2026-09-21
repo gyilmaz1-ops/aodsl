@@ -5,7 +5,15 @@ import json
 import re
 from pathlib import Path
 
-SCHEMA = "aodsl.certified-release-identity.v4"
+from aodsl.certification.certified_bundle import (
+    BUNDLE_MANIFEST_PATH,
+    HASH_ALGORITHM as BUNDLE_HASH_ALGORITHM,
+    INVARIANT as BUNDLE_INVARIANT,
+    SCHEMA as BUNDLE_SCHEMA,
+    verify_certified_bundle_manifest,
+)
+
+SCHEMA = "aodsl.certified-release-identity.v5"
 HASH_ALGORITHM = "sha256"
 WORKFLOW_PATH = ".github/workflows/production-release.yml"
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
@@ -31,6 +39,8 @@ def build_release_identity(
     certification_manifest_path: Path,
     sbom_path: Path,
     reproducibility_manifest_path: Path,
+    bundle_root: Path,
+    bundle_manifest_path: Path,
     *,
     git_commit_sha: str,
     git_tag: str,
@@ -44,6 +54,15 @@ def build_release_identity(
     reproducibility_manifest_path = Path(
         reproducibility_manifest_path
     ).resolve()
+    bundle_root = Path(bundle_root).resolve()
+    bundle_manifest_path = Path(bundle_manifest_path).resolve()
+
+    expected_bundle_manifest_path = (
+        root / BUNDLE_MANIFEST_PATH
+    ).resolve()
+    if bundle_manifest_path != expected_bundle_manifest_path:
+        raise ValueError("certified bundle manifest path mismatch")
+
     expected_reproducibility_manifest_path = (
         root / "dist/reproducibility-manifest.json"
     ).resolve()
@@ -77,6 +96,8 @@ def build_release_identity(
         raise ValueError(f"production SBOM missing: {sbom_path}")
     if not reproducibility_manifest_path.is_file():
         raise ValueError("reproducibility manifest missing")
+    if not bundle_manifest_path.is_file():
+        raise ValueError("certified bundle manifest missing")
     if not dependency_lock_path.is_file():
         raise ValueError("production dependency lock missing")
     if not build_environment_path.is_file():
@@ -158,6 +179,33 @@ def build_release_identity(
     if reproducible_sbom.get("sha256") != sbom_sha:
         raise ValueError("reproducibility SBOM SHA-256 mismatch")
 
+    staged_bundle_manifest_path = (
+        bundle_root / BUNDLE_MANIFEST_PATH
+    ).resolve()
+
+    bundle_errors = verify_certified_bundle_manifest(
+        bundle_root,
+        staged_bundle_manifest_path,
+    )
+    if bundle_errors:
+        raise ValueError(
+            "certified bundle verification failed: "
+            + "; ".join(bundle_errors)
+        )
+
+    if (
+        staged_bundle_manifest_path.read_bytes()
+        != bundle_manifest_path.read_bytes()
+    ):
+        raise ValueError(
+            "promoted certified bundle manifest differs from "
+            "physically verified staged manifest"
+        )
+
+    bundle_manifest = json.loads(
+        bundle_manifest_path.read_text(encoding="utf-8")
+    )
+
     return {
         "schema": SCHEMA,
         "hash_algorithm": HASH_ALGORITHM,
@@ -187,6 +235,15 @@ def build_release_identity(
             "sha256": sbom_sha,
             "dependency_lock_path": "requirements/production.lock",
             "dependency_lock_sha256": _sha256_file(dependency_lock_path),
+        },
+        "certified_bundle": {
+            "manifest_path": BUNDLE_MANIFEST_PATH,
+            "manifest_sha256": _sha256_file(bundle_manifest_path),
+            "schema": BUNDLE_SCHEMA,
+            "invariant": BUNDLE_INVARIANT,
+            "hash_algorithm": BUNDLE_HASH_ALGORITHM,
+            "closure_policy": bundle_manifest["closure"]["policy"],
+            "payload_count": bundle_manifest["closure"]["payload_count"],
         },
         "reproducibility": {
             "manifest_path": "dist/reproducibility-manifest.json",
@@ -228,6 +285,8 @@ def verify_release_identity(
     certification_manifest_path: Path,
     sbom_path: Path,
     reproducibility_manifest_path: Path,
+    bundle_root: Path,
+    bundle_manifest_path: Path,
     *,
     git_commit_sha: str,
     git_tag: str,
@@ -242,6 +301,8 @@ def verify_release_identity(
             certification_manifest_path,
             sbom_path,
             reproducibility_manifest_path,
+            bundle_root,
+            bundle_manifest_path,
             git_commit_sha=git_commit_sha,
             git_tag=git_tag,
             repository=repository,

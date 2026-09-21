@@ -30,6 +30,8 @@ errors = verify_release_identity(
     ROOT / "certification/production-certification-manifest.json",
     DIST / "aodsl-1.0.0.cdx.json",
     DIST / "reproducibility-manifest.json",
+    DIST / "certified-bundle-stage",
+    DIST / "certified-bundle-manifest.json",
     git_commit_sha=os.environ["GITHUB_SHA"],
     git_tag=tag,
     repository=repo,
