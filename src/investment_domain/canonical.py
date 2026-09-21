@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import asdict, is_dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from enum import Enum
 from typing import Any
@@ -16,7 +16,14 @@ def canonical_value(value: Any) -> Any:
         return value.value
     if isinstance(value, Decimal):
         return format(value, "f")
-    if isinstance(value, (datetime, date)):
+    if isinstance(value, datetime):
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise TypeError(
+                "naive datetime is forbidden in canonical investment payloads"
+            )
+        normalized = value.astimezone(timezone.utc)
+        return normalized.isoformat(timespec="microseconds").replace("+00:00", "Z")
+    if isinstance(value, date):
         return value.isoformat()
     if isinstance(value, dict):
         return {

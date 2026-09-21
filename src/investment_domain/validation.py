@@ -62,11 +62,32 @@ def _validate_temporal(node) -> None:
             _aware(value, f.name)
 
     if isinstance(node, Evidence):
+        if node.observed_at < node.effective_at:
+            raise DomainValidationError(
+                "IDM-C004",
+                "Evidence.observed_at precedes effective_at",
+            )
+        if node.published_at < node.observed_at:
+            raise DomainValidationError(
+                "IDM-C004",
+                "Evidence.published_at precedes observed_at",
+            )
         if node.ingested_at < node.published_at:
             raise DomainValidationError(
                 "IDM-C004",
                 "Evidence.ingested_at precedes published_at",
             )
+        if node.supersedes_id is not None:
+            if not node.supersedes_id.startswith("evidence:"):
+                raise DomainValidationError(
+                    "IDM-C004",
+                    "Evidence.supersedes_id must reference Evidence",
+                )
+            if node.supersedes_id == node.id:
+                raise DomainValidationError(
+                    "IDM-C004",
+                    "Evidence cannot supersede itself",
+                )
 
     if isinstance(node, Metric):
         if node.period_start and node.period_start > node.period_end:
@@ -74,11 +95,32 @@ def _validate_temporal(node) -> None:
                 "IDM-C004",
                 "Metric.period_start exceeds period_end",
             )
+        if node.observed_at < node.effective_at:
+            raise DomainValidationError(
+                "IDM-C004",
+                "Metric.observed_at precedes effective_at",
+            )
+        if node.published_at < node.observed_at:
+            raise DomainValidationError(
+                "IDM-C004",
+                "Metric.published_at precedes observed_at",
+            )
         if node.ingested_at < node.published_at:
             raise DomainValidationError(
                 "IDM-C004",
                 "Metric.ingested_at precedes published_at",
             )
+        if node.supersedes_id is not None:
+            if not node.supersedes_id.startswith("metric:"):
+                raise DomainValidationError(
+                    "IDM-C004",
+                    "Metric.supersedes_id must reference Metric",
+                )
+            if node.supersedes_id == node.id:
+                raise DomainValidationError(
+                    "IDM-C004",
+                    "Metric cannot supersede itself",
+                )
 
 
 def _expected_identity(node):
@@ -96,6 +138,9 @@ def _expected_identity(node):
             "source_id": node.source_id,
             "source_version": node.source_version,
             "content_hash": node.content_hash,
+            "effective_at": node.effective_at,
+            "observed_at": node.observed_at,
+            "published_at": node.published_at,
         })
 
     if isinstance(node, Metric):
@@ -104,6 +149,9 @@ def _expected_identity(node):
             "name": node.name,
             "period_start": node.period_start,
             "period_end": node.period_end,
+            "effective_at": node.effective_at,
+            "observed_at": node.observed_at,
+            "published_at": node.published_at,
             "source_id": node.source_id,
             "source_version": node.source_version,
         })

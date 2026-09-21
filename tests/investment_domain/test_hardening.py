@@ -155,12 +155,17 @@ def test_naive_datetime_rejected():
         "source_id": "filing:x",
         "source_version": "1",
         "content_hash": "a" * 64,
+        "effective_at": datetime(2025, 12, 31, tzinfo=UTC),
+        "observed_at": datetime(2026, 1, 1, tzinfo=UTC),
+        "published_at": datetime(2026, 1, 2, tzinfo=UTC),
     }
     node = Evidence(
         id=canonical_id("evidence", payload),
         source_id="filing:x",
         source_version="1",
         content_hash="a" * 64,
+        effective_at=datetime(2025, 12, 31, tzinfo=UTC),
+        observed_at=datetime(2026, 1, 1, tzinfo=UTC),
         published_at=datetime(2026, 1, 1),
         ingested_at=datetime(2026, 1, 2),
     )
@@ -185,6 +190,8 @@ def test_metric_invalid_period_rejected():
         unit="currency",
         period_start=payload["period_start"],
         period_end=payload["period_end"],
+        effective_at=payload["period_end"],
+        observed_at=payload["period_end"],
         published_at=datetime(2027, 1, 1, tzinfo=UTC),
         ingested_at=datetime(2027, 1, 2, tzinfo=UTC),
         source_id="filing:x",

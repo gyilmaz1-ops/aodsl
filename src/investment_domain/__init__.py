@@ -16,6 +16,7 @@ from .nodes import (
     Security,
     Valuation,
 )
+from .temporal import active_revision_at, available_at
 from .types import NodeType
 from .validation import DomainValidationError, validate_edge, validate_node
 
@@ -41,4 +42,6 @@ __all__ = [
     "DomainValidationError",
     "validate_node",
     "validate_edge",
+    "available_at",
+    "active_revision_at",
 ]

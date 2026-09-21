@@ -31,8 +31,11 @@ class Evidence:
     source_id: str
     source_version: str
     content_hash: str
+    effective_at: datetime
+    observed_at: datetime
     published_at: datetime
     ingested_at: datetime
+    supersedes_id: Optional[str] = None
     source_uri: Optional[str] = None
     node_type: NodeType = field(default=NodeType.EVIDENCE, init=False)
 
@@ -46,10 +49,13 @@ class Metric:
     unit: str
     period_start: Optional[datetime]
     period_end: datetime
+    effective_at: datetime
+    observed_at: datetime
     published_at: datetime
     ingested_at: datetime
     source_id: str
     source_version: str
+    supersedes_id: Optional[str] = None
     currency: Optional[str] = None
     node_type: NodeType = field(default=NodeType.METRIC, init=False)
 
