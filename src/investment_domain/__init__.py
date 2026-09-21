@@ -23,6 +23,7 @@ from .claims import (
     validate_claim_evidence_link,
     validate_claim_transition,
 )
+from .repository import EvidenceRepository
 from .temporal import active_revision_at, available_at
 from .types import NodeType
 from .validation import DomainValidationError, validate_edge, validate_node
@@ -51,6 +52,7 @@ __all__ = [
     "validate_edge",
     "available_at",
     "active_revision_at",
+    "EvidenceRepository",
     "ClaimStatus",
     "ClaimEvidenceLink",
     "validate_claim_transition",
