@@ -62,11 +62,9 @@ def _validate_temporal(node) -> None:
             _aware(value, f.name)
 
     if isinstance(node, Evidence):
-        if node.observed_at < node.effective_at:
-            raise DomainValidationError(
-                "IDM-C004",
-                "Evidence.observed_at precedes effective_at",
-            )
+        # effective_at is economic applicability, not information
+        # availability. Evidence may validly describe a future-effective
+        # event already known to the system.
         if node.published_at < node.observed_at:
             raise DomainValidationError(
                 "IDM-C004",

@@ -112,17 +112,27 @@ def test_effective_time_does_not_create_lookahead_visibility():
     )
 
 
-def test_temporal_order_violation_rejected():
+def test_future_effective_evidence_is_valid_and_available_after_ingestion():
     node = evidence(
-        source_version="1",
-        content_hash="a" * 64,
-        effective_at=datetime(2027, 2, 10, 9, tzinfo=UTC),
-        observed_at=datetime(2027, 2, 10, 8, tzinfo=UTC),
-        published_at=datetime(2027, 2, 10, 10, tzinfo=UTC),
-        ingested_at=datetime(2027, 2, 10, 11, tzinfo=UTC),
+        source_version="future-policy",
+        content_hash="f" * 64,
+        effective_at=datetime(2027, 4, 1, tzinfo=UTC),
+        observed_at=datetime(2027, 2, 10, 7, tzinfo=UTC),
+        published_at=datetime(2027, 2, 10, 8, tzinfo=UTC),
+        ingested_at=datetime(2027, 2, 10, 8, 4, tzinfo=UTC),
     )
-    with pytest.raises(DomainValidationError, match="IDM-C004"):
-        validate_node(node)
+
+    validate_node(node)
+
+    assert not available_at(
+        node,
+        datetime(2027, 2, 10, 8, 3, 59, tzinfo=UTC),
+    )
+
+    assert available_at(
+        node,
+        datetime(2027, 2, 10, 8, 4, tzinfo=UTC),
+    )
 
 
 def test_historical_replay_uses_revision_available_at_cutoff():
@@ -186,7 +196,7 @@ def test_metric_revision_identity_includes_temporal_provenance():
     assert canonical_id("metric", base) != canonical_id("metric", later)
 
 
-def test_mixed_evidence_lineages_rejected():
+def test_independent_evidence_cannot_be_resolved_as_one_revision_chain():
     first = evidence(
         source_version="1",
         content_hash="a" * 64,
@@ -196,21 +206,16 @@ def test_mixed_evidence_lineages_rejected():
         ingested_at=datetime(2027, 2, 10, 8, 4, tzinfo=UTC),
     )
 
-    payload = {
-        "source_id": "filing:other",
-        "source_version": "1",
-        "content_hash": "b" * 64,
-        "effective_at": datetime(2026, 12, 31, tzinfo=UTC),
-        "observed_at": datetime(2027, 2, 10, 7, tzinfo=UTC),
-        "published_at": datetime(2027, 2, 10, 8, tzinfo=UTC),
-    }
-    second = Evidence(
-        id=canonical_id("evidence", payload),
-        **payload,
-        ingested_at=datetime(2027, 2, 10, 8, 5, tzinfo=UTC),
+    second = evidence(
+        source_version="2",
+        content_hash="b" * 64,
+        effective_at=datetime(2026, 12, 31, tzinfo=UTC),
+        observed_at=datetime(2027, 2, 11, 7, tzinfo=UTC),
+        published_at=datetime(2027, 2, 11, 8, tzinfo=UTC),
+        ingested_at=datetime(2027, 2, 11, 8, 4, tzinfo=UTC),
     )
 
-    with pytest.raises(ValueError, match="one logical source lineage"):
+    with pytest.raises(ValueError, match="exactly one root"):
         active_revision_at(
             [first, second],
             datetime(2027, 4, 1, tzinfo=UTC),
@@ -286,3 +291,113 @@ def test_superseding_revision_must_be_ingested_later():
             [original, revised],
             datetime(2027, 4, 1, tzinfo=UTC),
         )
+
+
+def test_revision_lineage_branch_rejected():
+    root = evidence(
+        source_version="1",
+        content_hash="a" * 64,
+        effective_at=datetime(2026, 12, 31, tzinfo=UTC),
+        observed_at=datetime(2027, 2, 10, 7, tzinfo=UTC),
+        published_at=datetime(2027, 2, 10, 8, tzinfo=UTC),
+        ingested_at=datetime(2027, 2, 10, 8, 4, tzinfo=UTC),
+    )
+
+    left = evidence(
+        source_version="2a",
+        content_hash="b" * 64,
+        effective_at=datetime(2026, 12, 31, tzinfo=UTC),
+        observed_at=datetime(2027, 3, 15, 7, tzinfo=UTC),
+        published_at=datetime(2027, 3, 15, 8, tzinfo=UTC),
+        ingested_at=datetime(2027, 3, 15, 8, 2, tzinfo=UTC),
+        supersedes_id=root.id,
+    )
+
+    right = evidence(
+        source_version="2b",
+        content_hash="c" * 64,
+        effective_at=datetime(2026, 12, 31, tzinfo=UTC),
+        observed_at=datetime(2027, 3, 16, 7, tzinfo=UTC),
+        published_at=datetime(2027, 3, 16, 8, tzinfo=UTC),
+        ingested_at=datetime(2027, 3, 16, 8, 2, tzinfo=UTC),
+        supersedes_id=root.id,
+    )
+
+    with pytest.raises(ValueError, match="must not branch"):
+        active_revision_at(
+            [root, left, right],
+            datetime(2027, 4, 1, tzinfo=UTC),
+        )
+
+
+def test_revision_lineage_disconnected_component_rejected():
+    root = evidence(
+        source_version="1",
+        content_hash="a" * 64,
+        effective_at=datetime(2026, 12, 31, tzinfo=UTC),
+        observed_at=datetime(2027, 2, 10, 7, tzinfo=UTC),
+        published_at=datetime(2027, 2, 10, 8, tzinfo=UTC),
+        ingested_at=datetime(2027, 2, 10, 8, 4, tzinfo=UTC),
+    )
+
+    revised = evidence(
+        source_version="2",
+        content_hash="b" * 64,
+        effective_at=datetime(2026, 12, 31, tzinfo=UTC),
+        observed_at=datetime(2027, 3, 15, 7, tzinfo=UTC),
+        published_at=datetime(2027, 3, 15, 8, tzinfo=UTC),
+        ingested_at=datetime(2027, 3, 15, 8, 2, tzinfo=UTC),
+        supersedes_id=root.id,
+    )
+
+    independent = evidence(
+        source_version="independent",
+        content_hash="c" * 64,
+        effective_at=datetime(2026, 12, 31, tzinfo=UTC),
+        observed_at=datetime(2027, 3, 16, 7, tzinfo=UTC),
+        published_at=datetime(2027, 3, 16, 8, tzinfo=UTC),
+        ingested_at=datetime(2027, 3, 16, 8, 2, tzinfo=UTC),
+    )
+
+    with pytest.raises(ValueError, match="exactly one root"):
+        active_revision_at(
+            [root, revised, independent],
+            datetime(2027, 4, 1, tzinfo=UTC),
+        )
+
+
+def test_metric_observation_cannot_precede_effective_time():
+    payload = {
+        "subject_id": "company:x",
+        "name": "revenue",
+        "period_start": datetime(2027, 1, 1, tzinfo=UTC),
+        "period_end": datetime(2027, 3, 31, tzinfo=UTC),
+        "effective_at": datetime(2027, 3, 31, tzinfo=UTC),
+        "observed_at": datetime(2027, 3, 30, tzinfo=UTC),
+        "published_at": datetime(2027, 4, 1, tzinfo=UTC),
+        "source_id": "filing:x",
+        "source_version": "1",
+    }
+
+    node = Metric(
+        id=canonical_id("metric", payload),
+        subject_id=payload["subject_id"],
+        name=payload["name"],
+        value=Decimal("100"),
+        unit="currency",
+        currency="USD",
+        period_start=payload["period_start"],
+        period_end=payload["period_end"],
+        effective_at=payload["effective_at"],
+        observed_at=payload["observed_at"],
+        published_at=payload["published_at"],
+        ingested_at=datetime(2027, 4, 1, 0, 5, tzinfo=UTC),
+        source_id=payload["source_id"],
+        source_version=payload["source_version"],
+    )
+
+    with pytest.raises(
+        DomainValidationError,
+        match="Metric.observed_at precedes effective_at",
+    ):
+        validate_node(node)
