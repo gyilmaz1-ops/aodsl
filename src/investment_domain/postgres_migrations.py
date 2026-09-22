@@ -187,7 +187,31 @@ CREATE INDEX idx_domain_edges_target
 )
 
 
-MIGRATIONS = (INITIAL_SCHEMA,)
+EDGE_CREATED_AT = Migration(
+    version=2,
+    name="add_edge_created_at",
+    statements=(
+        """
+ALTER TABLE domain_edges
+    ADD COLUMN created_at TIMESTAMPTZ NULL
+""".strip(),
+        """
+UPDATE domain_edges
+SET created_at = stored_at
+WHERE created_at IS NULL
+""".strip(),
+        """
+ALTER TABLE domain_edges
+    ALTER COLUMN created_at SET NOT NULL
+""".strip(),
+    ),
+)
+
+
+MIGRATIONS = (
+    INITIAL_SCHEMA,
+    EDGE_CREATED_AT,
+)
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 
 validate_migrations(MIGRATIONS)

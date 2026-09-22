@@ -8,8 +8,10 @@ import pytest
 
 from investment_domain.postgres_migrations import (
     CURRENT_SCHEMA_VERSION,
+    EDGE_CREATED_AT,
     INITIAL_SCHEMA,
     MIGRATION_HISTORY_TABLE,
+    Migration,
     MigrationError,
     PostgreSQLMigrationManager,
     advisory_lock_key,
@@ -83,7 +85,12 @@ def test_live_initial_migration_and_idempotent_restart():
                 1,
                 INITIAL_SCHEMA.name,
                 INITIAL_SCHEMA.checksum,
-            )
+            ),
+            (
+                2,
+                EDGE_CREATED_AT.name,
+                EDGE_CREATED_AT.checksum,
+            ),
         ]
 
 
@@ -125,7 +132,7 @@ def test_live_newer_schema_fails_closed():
                     (version, name, checksum)
                 VALUES (%s, %s, %s)
                 """,
-                (2, "future_schema", "f" * 64),
+                (3, "future_schema", "f" * 64),
             )
 
     with pytest.raises(
@@ -241,7 +248,7 @@ def test_live_concurrent_startup_serializes_migration():
             """
         ).fetchone()[0]
 
-        assert count == 1
+        assert count == len(PostgreSQLMigrationManager(DSN).migrations)
 
 
 def _insert_domain_node(con, node_id, node_type):
@@ -377,3 +384,163 @@ def test_live_revision_branching_rejected():
                     "evidence:root",
                 ),
             )
+
+
+def test_live_v1_to_v2_upgrade_backfills_edge_created_at():
+    reset_database()
+
+    manager = PostgreSQLMigrationManager(DSN)
+
+    # Build a genuine v1 database first.
+    assert manager.migrate(target_version=1) == 1
+
+    with connect() as con:
+        _insert_domain_node(con, "claim:legacy", "Claim")
+        _insert_domain_node(con, "evidence:legacy", "Evidence")
+
+        con.execute(
+            """
+            INSERT INTO domain_edges (
+                source_id,
+                edge_type,
+                target_id
+            )
+            VALUES (%s, %s, %s)
+            """,
+            (
+                "claim:legacy",
+                "SUPPORTED_BY",
+                "evidence:legacy",
+            ),
+        )
+
+        legacy_stored_at = con.execute(
+            """
+            SELECT stored_at
+            FROM domain_edges
+            WHERE source_id = %s
+              AND edge_type = %s
+              AND target_id = %s
+            """,
+            (
+                "claim:legacy",
+                "SUPPORTED_BY",
+                "evidence:legacy",
+            ),
+        ).fetchone()[0]
+
+    # Upgrade the real v1 database using migration v2.
+    assert manager.migrate() == 2
+
+    with connect() as con:
+        row = con.execute(
+            """
+            SELECT stored_at, created_at
+            FROM domain_edges
+            WHERE source_id = %s
+              AND edge_type = %s
+              AND target_id = %s
+            """,
+            (
+                "claim:legacy",
+                "SUPPORTED_BY",
+                "evidence:legacy",
+            ),
+        ).fetchone()
+
+        assert row is not None
+        assert row[0] == legacy_stored_at
+        assert row[1] == legacy_stored_at
+
+        nullable = con.execute(
+            """
+            SELECT is_nullable
+            FROM information_schema.columns
+            WHERE table_schema = current_schema()
+              AND table_name = 'domain_edges'
+              AND column_name = 'created_at'
+            """
+        ).fetchone()
+
+        assert nullable == ("NO",)
+
+        history = con.execute(
+            f"""
+            SELECT version, name, checksum
+            FROM {MIGRATION_HISTORY_TABLE}
+            ORDER BY version
+            """
+        ).fetchall()
+
+        assert history == [
+            (
+                1,
+                INITIAL_SCHEMA.name,
+                INITIAL_SCHEMA.checksum,
+            ),
+            (
+                2,
+                EDGE_CREATED_AT.name,
+                EDGE_CREATED_AT.checksum,
+            ),
+        ]
+
+    # Restart must remain idempotent.
+    assert manager.migrate() == 2
+
+
+def test_live_failed_migration_rolls_back_ddl_and_history():
+    reset_database()
+
+    failing = Migration(
+        version=1,
+        name="transactional_ddl_failure_probe",
+        statements=(
+            """
+            CREATE TABLE idm_transaction_rollback_probe (
+                id INTEGER PRIMARY KEY
+            )
+            """.strip(),
+            """
+            THIS IS INTENTIONALLY INVALID SQL
+            """.strip(),
+        ),
+    )
+
+    manager = PostgreSQLMigrationManager(
+        DSN,
+        migrations=(failing,),
+    )
+
+    with pytest.raises(Exception):
+        manager.migrate()
+
+    with connect() as con:
+        probe_exists = con.execute(
+            """
+            SELECT to_regclass(
+                current_schema() || '.idm_transaction_rollback_probe'
+            )
+            """
+        ).fetchone()[0]
+
+        assert probe_exists is None
+
+        history_exists = con.execute(
+            """
+            SELECT to_regclass(
+                current_schema() || %s
+            )
+            """,
+            (f".{MIGRATION_HISTORY_TABLE}",),
+        ).fetchone()[0]
+
+        if history_exists is not None:
+            history_count = con.execute(
+                f"""
+                SELECT COUNT(*)
+                FROM {MIGRATION_HISTORY_TABLE}
+                """
+            ).fetchone()[0]
+
+            assert history_count == 0

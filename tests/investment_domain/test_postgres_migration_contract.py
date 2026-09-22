@@ -86,14 +86,19 @@ def test_empty_migration_set_is_valid_before_first_schema_revision():
 def test_initial_schema_is_version_one_and_valid():
     from investment_domain.postgres_migrations import (
         CURRENT_SCHEMA_VERSION,
+        EDGE_CREATED_AT,
         INITIAL_SCHEMA,
         MIGRATIONS,
     )
 
     assert INITIAL_SCHEMA.version == 1
     assert INITIAL_SCHEMA.name == "initial_evidence_store"
-    assert MIGRATIONS == (INITIAL_SCHEMA,)
-    assert CURRENT_SCHEMA_VERSION == 1
+    assert EDGE_CREATED_AT.version == 2
+    assert MIGRATIONS == (
+        INITIAL_SCHEMA,
+        EDGE_CREATED_AT,
+    )
+    assert CURRENT_SCHEMA_VERSION == 2
 
     validate_migrations(MIGRATIONS)
 
@@ -204,15 +209,23 @@ def test_postgres_manager_rejects_newer_database_schema():
 
     manager = PostgreSQLMigrationManager("unused")
 
+    rows = {
+        1: (
+            manager.migrations[0].name,
+            manager.migrations[0].checksum,
+        ),
+        2: (
+            manager.migrations[1].name,
+            manager.migrations[1].checksum,
+        ),
+        3: ("future_migration", "future_checksum"),
+    }
+
     with pytest.raises(
         MigrationError,
         match="IDM-M410: DATABASE_SCHEMA_NEWER_THAN_RUNTIME",
     ):
-        manager._validate_history(
-            {
-                2: ("future", "deadbeef"),
-            }
-        )
+        manager._validate_history(rows)
 
 
 def test_postgres_manager_rejects_checksum_drift():
@@ -343,3 +356,50 @@ def test_postgres_manager_rejects_applied_history_gap():
         match="IDM-M414: APPLIED_MIGRATION_HISTORY_GAP",
     ):
         manager._validate_history(rows)
+
+
+def test_edge_created_at_migration_is_version_two():
+    from investment_domain.postgres_migrations import (
+        CURRENT_SCHEMA_VERSION,
+        EDGE_CREATED_AT,
+        INITIAL_SCHEMA,
+        MIGRATIONS,
+    )
+
+    assert EDGE_CREATED_AT.version == 2
+    assert EDGE_CREATED_AT.name == "add_edge_created_at"
+    assert MIGRATIONS == (
+        INITIAL_SCHEMA,
+        EDGE_CREATED_AT,
+    )
+    assert CURRENT_SCHEMA_VERSION == 2
+
+
+def test_edge_created_at_migration_preserves_v1_schema():
+    from investment_domain.postgres_migrations import (
+        EDGE_CREATED_AT,
+        INITIAL_SCHEMA,
+    )
+
+    initial_sql = "\n".join(INITIAL_SCHEMA.statements)
+    migration_sql = "\n".join(EDGE_CREATED_AT.statements)
+
+    assert "created_at" not in initial_sql
+    assert "ADD COLUMN created_at TIMESTAMPTZ NULL" in migration_sql
+    assert "SET created_at = stored_at" in migration_sql
+    assert "ALTER COLUMN created_at SET NOT NULL" in migration_sql
+
+
+def test_edge_created_at_migration_checksum_is_content_bound():
+    from investment_domain.postgres_migrations import (
+        EDGE_CREATED_AT,
+        Migration,
+    )
+
+    changed = Migration(
+        EDGE_CREATED_AT.version,
+        EDGE_CREATED_AT.name,
+        EDGE_CREATED_AT.statements + ("SELECT 1",),
+    )
+
+    assert changed.checksum != EDGE_CREATED_AT.checksum
