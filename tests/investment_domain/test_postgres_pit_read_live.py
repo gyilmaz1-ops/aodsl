@@ -598,3 +598,93 @@ def test_corrupted_evidence_projection_fails_closed():
             claim.id,
             datetime(2026, 9, 1, 12, tzinfo=UTC),
         )
+
+
+def test_read_rejects_claim_canonical_payload_nonidentity_corruption():
+    repo, claim, _ = setup_pair("claim-payload-integrity")
+
+    # created_by belongs to the full canonical Claim representation but is
+    # deliberately excluded from Claim identity.
+    with connect() as con:
+        con.execute(
+            """
+            UPDATE domain_nodes
+            SET canonical_payload =
+                jsonb_set(
+                    canonical_payload,
+                    '{created_by}',
+                    '"Corrupted_Agent"'::jsonb
+                )
+            WHERE id = %s
+            """,
+            (claim.id,),
+        )
+        con.commit()
+
+    with pytest.raises(
+        RepositoryReadError,
+        match="IDM-R505: STORED_NODE_INTEGRITY_FAILURE",
+    ):
+        repo.evidence_for_claim_at(
+            claim.id,
+            datetime(2026, 9, 1, 11, tzinfo=UTC),
+        )
+
+
+def test_read_rejects_evidence_projection_nonidentity_corruption():
+    repo, claim, evidence = setup_pair(
+        "evidence-projection-integrity"
+    )
+
+    # source_uri belongs to the full Evidence representation but is
+    # deliberately excluded from Evidence identity.
+    with connect() as con:
+        con.execute(
+            """
+            UPDATE evidence_facts
+            SET source_uri = %s
+            WHERE node_id = %s
+            """,
+            (
+                "corrupted://evidence-projection",
+                evidence.id,
+            ),
+        )
+        con.commit()
+
+    with pytest.raises(
+        RepositoryReadError,
+        match="IDM-R505: STORED_NODE_INTEGRITY_FAILURE",
+    ):
+        repo.evidence_for_claim_at(
+            claim.id,
+            datetime(2026, 9, 1, 11, tzinfo=UTC),
+        )
+
+
+def test_read_rejects_payload_hash_only_corruption():
+    repo, claim, evidence = setup_pair(
+        "payload-hash-integrity"
+    )
+
+    # The canonical payload remains untouched. Only its persisted digest is
+    # corrupted, which must independently fail closed on read.
+    with connect() as con:
+        con.execute(
+            """
+            UPDATE domain_nodes
+            SET payload_hash = %s
+            WHERE id = %s
+            """,
+            ("0" * 64, evidence.id),
+        )
+        con.commit()
+
+    with pytest.raises(
+        RepositoryReadError,
+        match="IDM-R505: STORED_NODE_INTEGRITY_FAILURE",
+    ):
+        repo.evidence_for_claim_at(
+            claim.id,
+            datetime(2026, 9, 1, 11, tzinfo=UTC),
+        )

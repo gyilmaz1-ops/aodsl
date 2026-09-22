@@ -460,6 +460,29 @@ class PostgreSQLEvidenceRepository:
                         link=link,
                     )
 
+    @staticmethod
+    def _assert_stored_node_integrity(
+        *,
+        node,
+        stored_payload,
+        stored_hash,
+    ) -> None:
+        try:
+            actual_hash = canonical_sha256(stored_payload)
+            reconstructed_payload = json.loads(canonical_json(node))
+        except (TypeError, ValueError) as exc:
+            raise RepositoryReadError(
+                "IDM-R505: STORED_NODE_INTEGRITY_FAILURE"
+            ) from exc
+
+        if (
+            actual_hash != str(stored_hash)
+            or reconstructed_payload != stored_payload
+        ):
+            raise RepositoryReadError(
+                "IDM-R505: STORED_NODE_INTEGRITY_FAILURE"
+            )
+
     def evidence_for_claim_at(
         self,
         claim_id,
@@ -486,7 +509,8 @@ class PostgreSQLEvidenceRepository:
                 """
                 SELECT
                     n.node_type,
-                    n.canonical_payload
+                    n.canonical_payload,
+                    n.payload_hash
                 FROM domain_nodes AS n
                 WHERE n.id = %s
                 """,
@@ -518,6 +542,11 @@ class PostgreSQLEvidenceRepository:
                 scope=claim_payload["scope"],
             )
             validate_node(claim)
+            self._assert_stored_node_integrity(
+                node=claim,
+                stored_payload=claim_payload,
+                stored_hash=claim_row[2],
+            )
 
             link_rows = con.execute(
                 """
@@ -592,10 +621,15 @@ class PostgreSQLEvidenceRepository:
                     e.published_at,
                     e.ingested_at,
                     e.supersedes_id,
-                    e.source_uri
+                    e.source_uri,
+                    n.node_type,
+                    n.canonical_payload,
+                    n.payload_hash
                 FROM evidence_facts AS e
                 JOIN descendants AS d
                   ON d.node_id = e.node_id
+                JOIN domain_nodes AS n
+                  ON n.id = e.node_id
                 ORDER BY e.node_id
                 """,
                 (list(linked_ids),),
@@ -625,8 +659,19 @@ class PostgreSQLEvidenceRepository:
             for row in evidence_rows
         )
 
-        for node in evidence:
+        for node, row in zip(evidence, evidence_rows):
             validate_node(node)
+
+            if str(row[10]) != NodeType.EVIDENCE.value:
+                raise RepositoryReadError(
+                    "IDM-R505: STORED_NODE_INTEGRITY_FAILURE"
+                )
+
+            self._assert_stored_node_integrity(
+                node=node,
+                stored_payload=row[11],
+                stored_hash=row[12],
+            )
 
         evidence_ids = {node.id for node in evidence}
         if not linked_ids.issubset(evidence_ids):
