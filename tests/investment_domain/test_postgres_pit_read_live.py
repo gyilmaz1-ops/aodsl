@@ -12,6 +12,7 @@ from investment_domain import (
     Evidence,
     PostgreSQLEvidenceRepository,
     RepositoryReadError,
+    RepositoryWriteError,
     canonical_id,
 )
 from investment_domain.postgres_migrations import (
@@ -524,7 +525,7 @@ def test_missing_predecessor_rejected_by_database():
 
 
 
-def test_branching_revision_rejected_by_database():
+def test_branching_revision_rejected_by_repository():
     repo = PostgreSQLEvidenceRepository(DSN)
 
     root = make_evidence("branch-root")
@@ -546,9 +547,10 @@ def test_branching_revision_rejected_by_database():
     repo.add_evidence(root)
     repo.add_evidence(left)
 
-    import psycopg
-
-    with pytest.raises(psycopg.errors.UniqueViolation):
+    with pytest.raises(
+        RepositoryWriteError,
+        match="IDM-W515: REVISION_BRANCH_FORBIDDEN",
+    ):
         repo.add_evidence(right)
 
     # Failed competing successor must not leave a partial node.

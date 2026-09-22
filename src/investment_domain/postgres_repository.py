@@ -282,6 +282,48 @@ class PostgreSQLEvidenceRepository:
                         claim,
                     )
 
+    @staticmethod
+    def _validate_revision_append(
+        con,
+        evidence: Evidence,
+    ) -> None:
+        predecessor = con.execute(
+            """
+            SELECT ingested_at
+            FROM evidence_facts
+            WHERE node_id = %s
+            FOR UPDATE
+            """,
+            (evidence.supersedes_id,),
+        ).fetchone()
+
+        if predecessor is None:
+            raise RepositoryWriteError(
+                "IDM-W512: REVISION_PREDECESSOR_NOT_FOUND"
+            )
+
+        if evidence.ingested_at <= predecessor[0]:
+            raise RepositoryWriteError(
+                "IDM-W514: NON_MONOTONIC_REVISION_INGESTION"
+            )
+
+        successor = con.execute(
+            """
+            SELECT node_id
+            FROM evidence_facts
+            WHERE supersedes_id = %s
+            """,
+            (evidence.supersedes_id,),
+        ).fetchone()
+
+        if (
+            successor is not None
+            and str(successor[0]) != evidence.id
+        ):
+            raise RepositoryWriteError(
+                "IDM-W515: REVISION_BRANCH_FORBIDDEN"
+            )
+
     def add_evidence(self, evidence: Evidence) -> None:
         validate_node(evidence)
 
@@ -289,6 +331,12 @@ class PostgreSQLEvidenceRepository:
 
         with self.connect() as con:
             with con.transaction():
+                if evidence.supersedes_id is not None:
+                    self._validate_revision_append(
+                        con,
+                        evidence,
+                    )
+
                 self._insert_domain_node(
                     con,
                     node_id=evidence.id,
