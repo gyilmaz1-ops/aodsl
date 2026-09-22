@@ -3,8 +3,11 @@ from __future__ import annotations
 import json
 
 from .canonical import canonical_json, canonical_sha256
+from .claims import ClaimEvidenceLink, validate_claim_evidence_link
+from .edges import Edge, EdgeType
 from .nodes import Claim, Evidence
-from .validation import validate_node
+from .types import NodeType
+from .validation import validate_edge, validate_node
 
 
 class RepositoryWriteError(RuntimeError):
@@ -309,10 +312,126 @@ class PostgreSQLEvidenceRepository:
                         evidence,
                     )
 
-    def add_claim_evidence_link(self, link):
-        raise NotImplementedError(
-            "IDM-004C.2 claim-evidence write path not implemented"
+    @staticmethod
+    def _assert_edge_endpoint(
+        con,
+        *,
+        node_id: str,
+        expected_type: NodeType,
+        missing_code: str,
+        mismatch_code: str,
+    ) -> None:
+        row = con.execute(
+            """
+            SELECT node_type
+            FROM domain_nodes
+            WHERE id = %s
+            """,
+            (node_id,),
+        ).fetchone()
+
+        if row is None:
+            raise RepositoryWriteError(missing_code)
+
+        if str(row[0]) != expected_type.value:
+            raise RepositoryWriteError(mismatch_code)
+
+    @staticmethod
+    def _assert_existing_edge_matches(
+        con,
+        *,
+        link: ClaimEvidenceLink,
+    ) -> None:
+        row = con.execute(
+            """
+            SELECT created_at
+            FROM domain_edges
+            WHERE source_id = %s
+              AND edge_type = %s
+              AND target_id = %s
+            """,
+            (
+                link.claim_id,
+                link.relation.value,
+                link.evidence_id,
+            ),
+        ).fetchone()
+
+        if row is None:
+            raise RepositoryWriteError(
+                "IDM-W511: CLAIM_EVIDENCE_EDGE_WRITE_LOST"
+            )
+
+        if row[0] != link.created_at:
+            raise RepositoryWriteError(
+                "IDM-W506: EDGE_CONTENT_COLLISION"
+            )
+
+    def add_claim_evidence_link(
+        self,
+        link: ClaimEvidenceLink,
+    ) -> None:
+        validate_claim_evidence_link(link)
+
+        edge = Edge(
+            source_id=link.claim_id,
+            source_type=NodeType.CLAIM,
+            edge_type=link.relation,
+            target_id=link.evidence_id,
+            target_type=NodeType.EVIDENCE,
         )
+        validate_edge(edge)
+
+        with self.connect() as con:
+            with con.transaction():
+                self._assert_edge_endpoint(
+                    con,
+                    node_id=link.claim_id,
+                    expected_type=NodeType.CLAIM,
+                    missing_code=(
+                        "IDM-W507: EDGE_SOURCE_NOT_FOUND"
+                    ),
+                    mismatch_code=(
+                        "IDM-W509: EDGE_SOURCE_TYPE_MISMATCH"
+                    ),
+                )
+
+                self._assert_edge_endpoint(
+                    con,
+                    node_id=link.evidence_id,
+                    expected_type=NodeType.EVIDENCE,
+                    missing_code=(
+                        "IDM-W508: EDGE_TARGET_NOT_FOUND"
+                    ),
+                    mismatch_code=(
+                        "IDM-W510: EDGE_TARGET_TYPE_MISMATCH"
+                    ),
+                )
+
+                result = con.execute(
+                    """
+                    INSERT INTO domain_edges (
+                        source_id,
+                        edge_type,
+                        target_id,
+                        created_at
+                    )
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT DO NOTHING
+                    """,
+                    (
+                        link.claim_id,
+                        link.relation.value,
+                        link.evidence_id,
+                        link.created_at,
+                    ),
+                )
+
+                if result.rowcount == 0:
+                    self._assert_existing_edge_matches(
+                        con,
+                        link=link,
+                    )
 
     def evidence_for_claim_at(self, claim_id, research_cutoff):
         raise NotImplementedError(
