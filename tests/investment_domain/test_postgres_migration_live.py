@@ -9,6 +9,7 @@ import pytest
 from investment_domain.postgres_migrations import (
     CURRENT_SCHEMA_VERSION,
     EDGE_CREATED_AT,
+    EDGE_ENDPOINT_TYPES,
     INITIAL_SCHEMA,
     MIGRATION_HISTORY_TABLE,
     Migration,
@@ -91,6 +92,11 @@ def test_live_initial_migration_and_idempotent_restart():
                 EDGE_CREATED_AT.name,
                 EDGE_CREATED_AT.checksum,
             ),
+            (
+                3,
+                EDGE_ENDPOINT_TYPES.name,
+                EDGE_ENDPOINT_TYPES.checksum,
+            ),
         ]
 
 
@@ -132,7 +138,7 @@ def test_live_newer_schema_fails_closed():
                     (version, name, checksum)
                 VALUES (%s, %s, %s)
                 """,
-                (3, "future_schema", "f" * 64),
+                (CURRENT_SCHEMA_VERSION + 1, "future_schema", "f" * 64),
             )
 
     with pytest.raises(
@@ -430,7 +436,7 @@ def test_live_v1_to_v2_upgrade_backfills_edge_created_at():
         ).fetchone()[0]
 
     # Upgrade the real v1 database using migration v2.
-    assert manager.migrate() == 2
+    assert manager.migrate(target_version=2) == 2
 
     with connect() as con:
         row = con.execute(
@@ -485,8 +491,8 @@ def test_live_v1_to_v2_upgrade_backfills_edge_created_at():
             ),
         ]
 
-    # Restart must remain idempotent.
-    assert manager.migrate() == 2
+    # Restart at v2 must remain idempotent.
+    assert manager.migrate(target_version=2) == 2
 
 
 def test_live_failed_migration_rolls_back_ddl_and_history():
@@ -544,3 +550,203 @@ def test_live_failed_migration_rolls_back_ddl_and_history():
             ).fetchone()[0]
 
             assert history_count == 0
+
+
+def test_live_v2_to_v3_upgrade_backfills_edge_endpoint_types():
+    reset_database()
+    manager = PostgreSQLMigrationManager(DSN)
+
+    # Build a genuine v2 database.
+    assert manager.migrate(target_version=2) == 2
+
+    with connect() as con:
+        _insert_domain_node(con, "claim:legacy-v2", "Claim")
+        _insert_domain_node(con, "evidence:legacy-v2", "Evidence")
+
+        con.execute(
+            """
+            INSERT INTO domain_edges (
+                source_id,
+                edge_type,
+                target_id,
+                created_at
+            )
+            VALUES (%s, %s, %s, CURRENT_TIMESTAMP)
+            """,
+            (
+                "claim:legacy-v2",
+                "SUPPORTED_BY",
+                "evidence:legacy-v2",
+            ),
+        )
+
+    # Upgrade the real v2 database to v3.
+    assert manager.migrate() == 3
+
+    with connect() as con:
+        row = con.execute(
+            """
+            SELECT source_type, target_type
+            FROM domain_edges
+            WHERE source_id = %s
+              AND edge_type = %s
+              AND target_id = %s
+            """,
+            (
+                "claim:legacy-v2",
+                "SUPPORTED_BY",
+                "evidence:legacy-v2",
+            ),
+        ).fetchone()
+
+        assert row == ("Claim", "Evidence")
+
+        columns = dict(
+            con.execute(
+                """
+                SELECT column_name, is_nullable
+                FROM information_schema.columns
+                WHERE table_schema = current_schema()
+                  AND table_name = 'domain_edges'
+                  AND column_name IN ('source_type', 'target_type')
+                ORDER BY column_name
+                """
+            ).fetchall()
+        )
+
+        assert columns == {
+            "source_type": "NO",
+            "target_type": "NO",
+        }
+
+        history = con.execute(
+            f"""
+            SELECT version, name, checksum
+            FROM {MIGRATION_HISTORY_TABLE}
+            ORDER BY version
+            """
+        ).fetchall()
+
+        assert history == [
+            (
+                1,
+                INITIAL_SCHEMA.name,
+                INITIAL_SCHEMA.checksum,
+            ),
+            (
+                2,
+                EDGE_CREATED_AT.name,
+                EDGE_CREATED_AT.checksum,
+            ),
+            (
+                3,
+                EDGE_ENDPOINT_TYPES.name,
+                EDGE_ENDPOINT_TYPES.checksum,
+            ),
+        ]
+
+    # Restart must remain idempotent.
+    assert manager.migrate() == 3
+
+
+def test_live_v2_to_v3_reversed_edge_fails_closed_atomically():
+    import psycopg
+
+    reset_database()
+    manager = PostgreSQLMigrationManager(DSN)
+
+    # Build a genuine v2 database.
+    assert manager.migrate(target_version=2) == 2
+
+    with connect() as con:
+        _insert_domain_node(con, "claim:corrupt-v2", "Claim")
+        _insert_domain_node(con, "evidence:corrupt-v2", "Evidence")
+
+        # Valid under v2 physical schema, semantically reversed.
+        con.execute(
+            """
+            INSERT INTO domain_edges (
+                source_id,
+                edge_type,
+                target_id,
+                created_at
+            )
+            VALUES (%s, %s, %s, CURRENT_TIMESTAMP)
+            """,
+            (
+                "evidence:corrupt-v2",
+                "SUPPORTED_BY",
+                "claim:corrupt-v2",
+            ),
+        )
+
+    with pytest.raises(
+        (
+            psycopg.errors.ForeignKeyViolation,
+            psycopg.errors.CheckViolation,
+        )
+    ):
+        manager.migrate()
+
+    # Entire v3 migration must have rolled back.
+    with connect() as con:
+        version_3 = con.execute(
+            f"""
+            SELECT version
+            FROM {MIGRATION_HISTORY_TABLE}
+            WHERE version = 3
+            """
+        ).fetchone()
+
+        assert version_3 is None
+
+        columns = {
+            row[0]
+            for row in con.execute(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = current_schema()
+                  AND table_name = 'domain_edges'
+                  AND column_name IN ('source_type', 'target_type')
+                """
+            ).fetchall()
+        }
+
+        assert columns == set()
+
+        edge = con.execute(
+            """
+            SELECT source_id, edge_type, target_id
+            FROM domain_edges
+            WHERE source_id = %s
+              AND edge_type = %s
+              AND target_id = %s
+            """,
+            (
+                "evidence:corrupt-v2",
+                "SUPPORTED_BY",
+                "claim:corrupt-v2",
+            ),
+        ).fetchone()
+
+        assert edge == (
+            "evidence:corrupt-v2",
+            "SUPPORTED_BY",
+            "claim:corrupt-v2",
+        )
+
+        history = con.execute(
+            f"""
+            SELECT version
+            FROM {MIGRATION_HISTORY_TABLE}
+            ORDER BY version
+            """
+        ).fetchall()
+
+        assert history == [(1,), (2,)]
+
+    # This test intentionally leaves a semantically invalid v2 database
+    # after proving that the v3 migration fails closed atomically.
+    # Do not leak that state into subsequent live-test modules.
+    reset_database()

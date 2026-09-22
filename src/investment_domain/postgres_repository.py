@@ -487,17 +487,21 @@ class PostgreSQLEvidenceRepository:
                     """
                     INSERT INTO domain_edges (
                         source_id,
+                        source_type,
                         edge_type,
                         target_id,
+                        target_type,
                         created_at
                     )
-                    VALUES (%s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s)
                     ON CONFLICT DO NOTHING
                     """,
                     (
                         link.claim_id,
+                        NodeType.CLAIM.value,
                         link.relation.value,
                         link.evidence_id,
+                        NodeType.EVIDENCE.value,
                         link.created_at,
                     ),
                 )

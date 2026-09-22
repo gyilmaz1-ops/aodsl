@@ -87,6 +87,7 @@ def test_initial_schema_is_version_one_and_valid():
     from investment_domain.postgres_migrations import (
         CURRENT_SCHEMA_VERSION,
         EDGE_CREATED_AT,
+        EDGE_ENDPOINT_TYPES,
         INITIAL_SCHEMA,
         MIGRATIONS,
     )
@@ -97,8 +98,9 @@ def test_initial_schema_is_version_one_and_valid():
     assert MIGRATIONS == (
         INITIAL_SCHEMA,
         EDGE_CREATED_AT,
+        EDGE_ENDPOINT_TYPES,
     )
-    assert CURRENT_SCHEMA_VERSION == 2
+    assert CURRENT_SCHEMA_VERSION == 3
 
     validate_migrations(MIGRATIONS)
 
@@ -203,6 +205,7 @@ def test_postgres_manager_uses_independent_history_table():
 
 def test_postgres_manager_rejects_newer_database_schema():
     from investment_domain.postgres_migrations import (
+        CURRENT_SCHEMA_VERSION,
         MigrationError,
         PostgreSQLMigrationManager,
     )
@@ -210,16 +213,16 @@ def test_postgres_manager_rejects_newer_database_schema():
     manager = PostgreSQLMigrationManager("unused")
 
     rows = {
-        1: (
-            manager.migrations[0].name,
-            manager.migrations[0].checksum,
-        ),
-        2: (
-            manager.migrations[1].name,
-            manager.migrations[1].checksum,
-        ),
-        3: ("future_migration", "future_checksum"),
+        migration.version: (
+            migration.name,
+            migration.checksum,
+        )
+        for migration in manager.migrations
     }
+    rows[CURRENT_SCHEMA_VERSION + 1] = (
+        "future_migration",
+        "future_checksum",
+    )
 
     with pytest.raises(
         MigrationError,
@@ -362,6 +365,7 @@ def test_edge_created_at_migration_is_version_two():
     from investment_domain.postgres_migrations import (
         CURRENT_SCHEMA_VERSION,
         EDGE_CREATED_AT,
+        EDGE_ENDPOINT_TYPES,
         INITIAL_SCHEMA,
         MIGRATIONS,
     )
@@ -371,8 +375,9 @@ def test_edge_created_at_migration_is_version_two():
     assert MIGRATIONS == (
         INITIAL_SCHEMA,
         EDGE_CREATED_AT,
+        EDGE_ENDPOINT_TYPES,
     )
-    assert CURRENT_SCHEMA_VERSION == 2
+    assert CURRENT_SCHEMA_VERSION == 3
 
 
 def test_edge_created_at_migration_preserves_v1_schema():

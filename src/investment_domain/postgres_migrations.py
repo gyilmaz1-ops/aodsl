@@ -208,9 +208,53 @@ ALTER TABLE domain_edges
 )
 
 
+EDGE_ENDPOINT_TYPES = Migration(
+    version=3,
+    name="add_edge_endpoint_types",
+    statements=(
+        """
+ALTER TABLE domain_edges
+    ADD COLUMN source_type TEXT NULL,
+    ADD COLUMN target_type TEXT NULL
+""".strip(),
+        """
+UPDATE domain_edges
+SET source_type = 'Claim',
+    target_type = 'Evidence'
+WHERE source_type IS NULL
+   OR target_type IS NULL
+""".strip(),
+        """
+ALTER TABLE domain_edges
+    ALTER COLUMN source_type SET NOT NULL,
+    ALTER COLUMN target_type SET NOT NULL
+""".strip(),
+        """
+ALTER TABLE domain_edges
+    ADD CONSTRAINT domain_edges_source_type
+        CHECK (source_type = 'Claim'),
+    ADD CONSTRAINT domain_edges_target_type
+        CHECK (target_type = 'Evidence')
+""".strip(),
+        """
+ALTER TABLE domain_edges
+    ADD CONSTRAINT domain_edges_source_typed_fk
+        FOREIGN KEY (source_id, source_type)
+        REFERENCES domain_nodes(id, node_type)
+        ON DELETE RESTRICT,
+    ADD CONSTRAINT domain_edges_target_typed_fk
+        FOREIGN KEY (target_id, target_type)
+        REFERENCES domain_nodes(id, node_type)
+        ON DELETE RESTRICT
+""".strip(),
+    ),
+)
+
+
 MIGRATIONS = (
     INITIAL_SCHEMA,
     EDGE_CREATED_AT,
+    EDGE_ENDPOINT_TYPES,
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 
