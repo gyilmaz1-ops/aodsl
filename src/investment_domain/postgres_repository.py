@@ -3,11 +3,19 @@ from __future__ import annotations
 import json
 
 from .canonical import canonical_json, canonical_sha256
-from .claims import ClaimEvidenceLink, validate_claim_evidence_link
+from .claims import (
+    ClaimEvidenceLink,
+    eligible_claim_evidence,
+    validate_claim_evidence_link,
+)
 from .edges import Edge, EdgeType
 from .nodes import Claim, Evidence
 from .types import NodeType
 from .validation import validate_edge, validate_node
+
+
+class RepositoryReadError(RuntimeError):
+    """Persistent repository state cannot be read safely."""
 
 
 class RepositoryWriteError(RuntimeError):
@@ -206,6 +214,25 @@ class PostgreSQLEvidenceRepository:
             raise RepositoryWriteError(
                 "IDM-W505: EVIDENCE_PROJECTION_MISMATCH"
             )
+
+    @staticmethod
+    def _parse_payload_datetime(value):
+        from datetime import datetime
+
+        if isinstance(value, datetime):
+            return value
+        if not isinstance(value, str):
+            raise RepositoryReadError(
+                "IDM-R504: INVALID_STORED_CLAIM_PAYLOAD"
+            )
+        try:
+            return datetime.fromisoformat(
+                value.replace("Z", "+00:00")
+            )
+        except ValueError as exc:
+            raise RepositoryReadError(
+                "IDM-R504: INVALID_STORED_CLAIM_PAYLOAD"
+            ) from exc
 
     def add_claim(self, claim: Claim) -> None:
         validate_node(claim)
@@ -433,7 +460,196 @@ class PostgreSQLEvidenceRepository:
                         link=link,
                     )
 
-    def evidence_for_claim_at(self, claim_id, research_cutoff):
-        raise NotImplementedError(
-            "IDM-004D point-in-time read path not implemented"
+    def evidence_for_claim_at(
+        self,
+        claim_id,
+        research_cutoff,
+    ):
+        if (
+            research_cutoff.tzinfo is None
+            or research_cutoff.utcoffset() is None
+        ):
+            raise ValueError(
+                "research_cutoff must be timezone-aware"
+            )
+
+        if (
+            not isinstance(claim_id, str)
+            or not claim_id.startswith("claim:")
+        ):
+            raise ValueError(
+                "claim_id must reference Claim"
+            )
+
+        with self.connect() as con:
+            claim_row = con.execute(
+                """
+                SELECT
+                    n.node_type,
+                    n.canonical_payload
+                FROM domain_nodes AS n
+                WHERE n.id = %s
+                """,
+                (claim_id,),
+            ).fetchone()
+
+            if claim_row is None:
+                raise RepositoryReadError(
+                    "IDM-R501: CLAIM_NOT_FOUND"
+                )
+
+            if str(claim_row[0]) != NodeType.CLAIM.value:
+                raise RepositoryReadError(
+                    "IDM-R502: CLAIM_TYPE_MISMATCH"
+                )
+
+            claim_payload = claim_row[1]
+            claim = Claim(
+                id=claim_id,
+                subject_id=claim_payload["subject_id"],
+                predicate=claim_payload["predicate"],
+                as_of=self._parse_payload_datetime(
+                    claim_payload["as_of"]
+                ),
+                created_by=claim_payload["created_by"],
+                object_value=claim_payload.get("object_value"),
+                object_ref=claim_payload.get("object_ref"),
+                polarity=claim_payload["polarity"],
+                scope=claim_payload["scope"],
+            )
+            validate_node(claim)
+
+            link_rows = con.execute(
+                """
+                SELECT
+                    target_id,
+                    edge_type,
+                    created_at
+                FROM domain_edges
+                WHERE source_id = %s
+                  AND edge_type IN (
+                      'SUPPORTED_BY',
+                      'CONTRADICTED_BY'
+                  )
+                ORDER BY target_id, edge_type
+                """,
+                (claim_id,),
+            ).fetchall()
+
+            if not link_rows:
+                return ()
+
+            linked_ids = {
+                str(row[0])
+                for row in link_rows
+            }
+
+            evidence_rows = con.execute(
+                """
+                WITH RECURSIVE
+                ancestors(node_id, supersedes_id) AS (
+                    SELECT
+                        e.node_id,
+                        e.supersedes_id
+                    FROM evidence_facts AS e
+                    WHERE e.node_id = ANY(%s)
+
+                    UNION
+
+                    SELECT
+                        parent.node_id,
+                        parent.supersedes_id
+                    FROM evidence_facts AS parent
+                    JOIN ancestors AS child
+                      ON parent.node_id = child.supersedes_id
+                ),
+                roots(node_id) AS (
+                    SELECT DISTINCT
+                        a.node_id
+                    FROM ancestors AS a
+                    WHERE a.supersedes_id IS NULL
+                ),
+                descendants(node_id) AS (
+                    SELECT
+                        r.node_id
+                    FROM roots AS r
+
+                    UNION
+
+                    SELECT
+                        child.node_id
+                    FROM evidence_facts AS child
+                    JOIN descendants AS parent
+                      ON child.supersedes_id = parent.node_id
+                )
+                SELECT
+                    e.node_id,
+                    e.source_id,
+                    e.source_version,
+                    e.content_hash,
+                    e.effective_at,
+                    e.observed_at,
+                    e.published_at,
+                    e.ingested_at,
+                    e.supersedes_id,
+                    e.source_uri
+                FROM evidence_facts AS e
+                JOIN descendants AS d
+                  ON d.node_id = e.node_id
+                ORDER BY e.node_id
+                """,
+                (list(linked_ids),),
+            ).fetchall()
+
+        evidence = tuple(
+            Evidence(
+                id=str(row[0]),
+                source_id=str(row[1]),
+                source_version=str(row[2]),
+                content_hash=str(row[3]),
+                effective_at=row[4],
+                observed_at=row[5],
+                published_at=row[6],
+                ingested_at=row[7],
+                supersedes_id=(
+                    str(row[8])
+                    if row[8] is not None
+                    else None
+                ),
+                source_uri=(
+                    str(row[9])
+                    if row[9] is not None
+                    else None
+                ),
+            )
+            for row in evidence_rows
+        )
+
+        for node in evidence:
+            validate_node(node)
+
+        evidence_ids = {node.id for node in evidence}
+        if not linked_ids.issubset(evidence_ids):
+            raise RepositoryReadError(
+                "IDM-R503: LINKED_EVIDENCE_NOT_FOUND"
+            )
+
+        links = tuple(
+            ClaimEvidenceLink(
+                claim_id=claim_id,
+                evidence_id=str(row[0]),
+                relation=EdgeType(str(row[1])),
+                created_at=row[2],
+            )
+            for row in link_rows
+        )
+
+        for link in links:
+            validate_claim_evidence_link(link)
+
+        return eligible_claim_evidence(
+            claim,
+            evidence,
+            links,
+            research_cutoff,
         )

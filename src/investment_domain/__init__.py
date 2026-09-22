@@ -26,6 +26,7 @@ from .claims import (
 from .repository import EvidenceRepository
 from .postgres_repository import (
     PostgreSQLEvidenceRepository,
+    RepositoryReadError,
     RepositoryWriteError,
 )
 from .temporal import active_revision_at, available_at
@@ -58,6 +59,7 @@ __all__ = [
     "active_revision_at",
     "EvidenceRepository",
     "PostgreSQLEvidenceRepository",
+    "RepositoryReadError",
     "RepositoryWriteError",
     "ClaimStatus",
     "ClaimEvidenceLink",
