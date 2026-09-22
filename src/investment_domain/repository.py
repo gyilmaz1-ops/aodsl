@@ -5,11 +5,17 @@ from typing import Protocol
 
 from .claims import ClaimEvidenceLink
 from .edges import EdgeType
-from .nodes import Evidence
+from .nodes import Claim, Evidence
 
 
 class EvidenceRepository(Protocol):
     """Persistence-independent Evidence/Claim repository contract."""
+
+    def add_claim(
+        self,
+        claim: Claim,
+    ) -> None:
+        ...
 
     def add_evidence(
         self,

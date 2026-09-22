@@ -24,6 +24,10 @@ from .claims import (
     validate_claim_transition,
 )
 from .repository import EvidenceRepository
+from .postgres_repository import (
+    PostgreSQLEvidenceRepository,
+    RepositoryWriteError,
+)
 from .temporal import active_revision_at, available_at
 from .types import NodeType
 from .validation import DomainValidationError, validate_edge, validate_node
@@ -53,6 +57,8 @@ __all__ = [
     "available_at",
     "active_revision_at",
     "EvidenceRepository",
+    "PostgreSQLEvidenceRepository",
+    "RepositoryWriteError",
     "ClaimStatus",
     "ClaimEvidenceLink",
     "validate_claim_transition",

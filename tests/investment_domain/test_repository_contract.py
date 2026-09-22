@@ -8,6 +8,7 @@ def test_evidence_repository_contract_is_runtime_visible():
     assert EvidenceRepository.__name__ == "EvidenceRepository"
 
     expected = {
+        "add_claim",
         "add_evidence",
         "add_claim_evidence_link",
         "evidence_for_claim_at",
@@ -23,3 +24,21 @@ def test_historical_read_requires_explicit_research_cutoff():
 
     assert hints["claim_id"] is str
     assert hints["research_cutoff"] is datetime
+
+
+
+def test_repository_write_contract_uses_domain_types():
+    from investment_domain import Claim, Evidence
+
+    claim_hints = get_type_hints(
+        EvidenceRepository.add_claim
+    )
+    evidence_hints = get_type_hints(
+        EvidenceRepository.add_evidence
+    )
+
+    assert claim_hints["claim"] is Claim
+    assert claim_hints["return"] is type(None)
+
+    assert evidence_hints["evidence"] is Evidence
+    assert evidence_hints["return"] is type(None)
