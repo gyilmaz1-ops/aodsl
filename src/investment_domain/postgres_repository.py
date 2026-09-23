@@ -9,7 +9,7 @@ from .claims import (
     validate_claim_evidence_link,
 )
 from .edges import Edge, EdgeType
-from .nodes import Claim, Evidence
+from .nodes import Claim, Evidence, Metric
 from .types import NodeType
 from .validation import validate_edge, validate_node
 
@@ -233,6 +233,129 @@ class PostgreSQLEvidenceRepository:
             raise RepositoryReadError(
                 "IDM-R504: INVALID_STORED_CLAIM_PAYLOAD"
             ) from exc
+
+    @staticmethod
+    def _assert_metric_projection_matches(
+        con,
+        metric: Metric,
+    ) -> None:
+        row = con.execute(
+            """
+            SELECT
+                node_type,
+                subject_id,
+                name,
+                value,
+                unit,
+                currency,
+                period_start,
+                period_end,
+                effective_at,
+                observed_at,
+                published_at,
+                ingested_at,
+                source_id,
+                source_version,
+                supersedes_id
+            FROM metric_facts
+            WHERE node_id = %s
+            """,
+            (metric.id,),
+        ).fetchone()
+
+        if row is None:
+            raise RepositoryWriteError(
+                "IDM-W516: METRIC_PROJECTION_WRITE_LOST"
+            )
+
+        expected = (
+            metric.node_type.value,
+            metric.subject_id,
+            metric.name,
+            metric.value,
+            metric.unit,
+            metric.currency,
+            metric.period_start,
+            metric.period_end,
+            metric.effective_at,
+            metric.observed_at,
+            metric.published_at,
+            metric.ingested_at,
+            metric.source_id,
+            metric.source_version,
+            metric.supersedes_id,
+        )
+
+        if tuple(row) != expected:
+            raise RepositoryWriteError(
+                "IDM-W517: METRIC_PROJECTION_MISMATCH"
+            )
+
+    def add_metric(self, metric: Metric) -> None:
+        validate_node(metric)
+        payload, payload_hash = self._payload(metric)
+
+        with self.connect() as con:
+            with con.transaction():
+                self._insert_domain_node(
+                    con,
+                    node_id=metric.id,
+                    node_type=metric.node_type.value,
+                    payload=payload,
+                    payload_hash=payload_hash,
+                )
+
+                result = con.execute(
+                    """
+                    INSERT INTO metric_facts (
+                        node_id,
+                        node_type,
+                        subject_id,
+                        name,
+                        value,
+                        unit,
+                        currency,
+                        period_start,
+                        period_end,
+                        effective_at,
+                        observed_at,
+                        published_at,
+                        ingested_at,
+                        source_id,
+                        source_version,
+                        supersedes_id
+                    )
+                    VALUES (
+                        %s, %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s, %s, %s, %s
+                    )
+                    ON CONFLICT (node_id) DO NOTHING
+                    """,
+                    (
+                        metric.id,
+                        metric.node_type.value,
+                        metric.subject_id,
+                        metric.name,
+                        metric.value,
+                        metric.unit,
+                        metric.currency,
+                        metric.period_start,
+                        metric.period_end,
+                        metric.effective_at,
+                        metric.observed_at,
+                        metric.published_at,
+                        metric.ingested_at,
+                        metric.source_id,
+                        metric.source_version,
+                        metric.supersedes_id,
+                    ),
+                )
+
+                if result.rowcount == 0:
+                    self._assert_metric_projection_matches(
+                        con,
+                        metric,
+                    )
 
     def add_claim(self, claim: Claim) -> None:
         validate_node(claim)

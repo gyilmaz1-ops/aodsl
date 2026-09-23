@@ -251,10 +251,45 @@ ALTER TABLE domain_edges
 )
 
 
+METRIC_FACTS = Migration(
+    version=4,
+    name="add_metric_facts",
+    statements=(
+        """
+CREATE TABLE metric_facts (
+    node_id TEXT PRIMARY KEY,
+    node_type TEXT NOT NULL DEFAULT 'Metric',
+    subject_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    value NUMERIC NOT NULL,
+    unit TEXT NOT NULL,
+    currency TEXT NULL,
+    period_start TIMESTAMPTZ NULL,
+    period_end TIMESTAMPTZ NOT NULL,
+    effective_at TIMESTAMPTZ NOT NULL,
+    observed_at TIMESTAMPTZ NOT NULL,
+    published_at TIMESTAMPTZ NOT NULL,
+    ingested_at TIMESTAMPTZ NOT NULL,
+    source_id TEXT NOT NULL,
+    source_version TEXT NOT NULL,
+    supersedes_id TEXT NULL,
+    CONSTRAINT metric_node_type
+        CHECK (node_type = 'Metric'),
+    CONSTRAINT metric_domain_node_fk
+        FOREIGN KEY (node_id, node_type)
+        REFERENCES domain_nodes(id, node_type)
+        ON DELETE RESTRICT
+)
+""".strip(),
+    ),
+)
+
+
 MIGRATIONS = (
     INITIAL_SCHEMA,
     EDGE_CREATED_AT,
     EDGE_ENDPOINT_TYPES,
+    METRIC_FACTS,
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 

@@ -12,6 +12,7 @@ from investment_domain.postgres_migrations import (
     EDGE_ENDPOINT_TYPES,
     INITIAL_SCHEMA,
     MIGRATION_HISTORY_TABLE,
+    METRIC_FACTS,
     Migration,
     MigrationError,
     PostgreSQLMigrationManager,
@@ -37,6 +38,7 @@ def reset_database():
     with connect() as con:
         with con.transaction():
             con.execute("DROP TABLE IF EXISTS domain_edges CASCADE")
+            con.execute("DROP TABLE IF EXISTS metric_facts CASCADE")
             con.execute("DROP TABLE IF EXISTS claim_facts CASCADE")
             con.execute("DROP TABLE IF EXISTS evidence_facts CASCADE")
             con.execute("DROP TABLE IF EXISTS domain_nodes CASCADE")
@@ -70,6 +72,7 @@ def test_live_initial_migration_and_idempotent_restart():
             "evidence_facts",
             "claim_facts",
             "domain_edges",
+            "metric_facts",
             MIGRATION_HISTORY_TABLE,
         } <= tables
 
@@ -96,6 +99,11 @@ def test_live_initial_migration_and_idempotent_restart():
                 3,
                 EDGE_ENDPOINT_TYPES.name,
                 EDGE_ENDPOINT_TYPES.checksum,
+            ),
+            (
+                4,
+                METRIC_FACTS.name,
+                METRIC_FACTS.checksum,
             ),
         ]
 
@@ -581,7 +589,7 @@ def test_live_v2_to_v3_upgrade_backfills_edge_endpoint_types():
         )
 
     # Upgrade the real v2 database to v3.
-    assert manager.migrate() == 3
+    assert manager.migrate(target_version=3) == 3
 
     with connect() as con:
         row = con.execute(
@@ -646,7 +654,7 @@ def test_live_v2_to_v3_upgrade_backfills_edge_endpoint_types():
         ]
 
     # Restart must remain idempotent.
-    assert manager.migrate() == 3
+    assert manager.migrate(target_version=3) == 3
 
 
 def test_live_v2_to_v3_reversed_edge_fails_closed_atomically():
