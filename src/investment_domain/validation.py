@@ -7,6 +7,7 @@ from decimal import Decimal
 
 from .edges import ALLOWED_EDGES, Edge
 from .identity import canonical_id
+from .metrics import MetricPeriodKind, metric_definition
 from .nodes import (
     Calculation,
     Claim,
@@ -88,6 +89,76 @@ def _validate_temporal(node) -> None:
                 )
 
     if isinstance(node, Metric):
+        definition = metric_definition(node.name)
+        if definition is None:
+            raise DomainValidationError(
+                "IDM-C004",
+                f"unknown Metric.name: {node.name}",
+            )
+
+        expected_prefix = ID_PREFIX.get(definition.subject_type)
+        if expected_prefix is None:
+            raise DomainValidationError(
+                "IDM-C004",
+                f"unsupported Metric subject type: {definition.subject_type.value}",
+            )
+        if (
+            not node.subject_id.startswith(expected_prefix)
+            or len(node.subject_id) == len(expected_prefix)
+        ):
+            raise DomainValidationError(
+                "IDM-C004",
+                f"Metric.subject_id must reference {definition.subject_type.value}",
+            )
+
+        if node.unit != definition.unit:
+            raise DomainValidationError(
+                "IDM-C004",
+                f"Metric.unit must be {definition.unit} for {node.name}",
+            )
+
+        if definition.requires_currency:
+            if node.currency is None:
+                raise DomainValidationError(
+                    "IDM-C004",
+                    f"Metric.currency is required for {node.name}",
+                )
+        elif node.currency is not None:
+            raise DomainValidationError(
+                "IDM-C004",
+                f"Metric.currency is forbidden for {node.name}",
+            )
+
+        if node.currency is not None:
+            if (
+                len(node.currency) != 3
+                or not node.currency.isascii()
+                or not node.currency.isalpha()
+                or node.currency != node.currency.upper()
+            ):
+                raise DomainValidationError(
+                    "IDM-C004",
+                    "Metric.currency must be an uppercase three-letter code",
+                )
+
+        if (
+            definition.period_kind is MetricPeriodKind.INSTANT
+            and node.period_start is not None
+        ):
+            raise DomainValidationError(
+                "IDM-C004",
+                f"Metric.period_start must be None for instant metric {node.name}",
+            )
+
+        if (
+            definition.period_kind is MetricPeriodKind.DURATION
+            and node.period_start is None
+        ):
+            raise DomainValidationError(
+                "IDM-C004",
+                f"Metric.period_start is required for duration metric {node.name}",
+            )
+
         if node.period_start and node.period_start > node.period_end:
             raise DomainValidationError(
                 "IDM-C004",
