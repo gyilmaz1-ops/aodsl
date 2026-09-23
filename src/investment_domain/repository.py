@@ -6,6 +6,7 @@ from typing import Protocol
 from .claims import ClaimEvidenceLink
 from .edges import EdgeType
 from .nodes import Claim, Evidence, Metric
+from .metrics import MetricEvidenceLink
 
 
 class EvidenceRepository(Protocol):
@@ -32,6 +33,12 @@ class EvidenceRepository(Protocol):
     def add_claim_evidence_link(
         self,
         link: ClaimEvidenceLink,
+    ) -> None:
+        ...
+
+    def add_metric_evidence_link(
+        self,
+        link: MetricEvidenceLink,
     ) -> None:
         ...
 

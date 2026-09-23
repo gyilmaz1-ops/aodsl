@@ -9,6 +9,7 @@ from .claims import (
     validate_claim_evidence_link,
 )
 from .edges import Edge, EdgeType
+from .metrics import MetricEvidenceLink, validate_metric_evidence_link
 from .nodes import Claim, Evidence, Metric
 from .types import NodeType
 from .validation import validate_edge, validate_node
@@ -538,7 +539,11 @@ class PostgreSQLEvidenceRepository:
     def _assert_existing_edge_matches(
         con,
         *,
-        link: ClaimEvidenceLink,
+        source_id: str,
+        relation: EdgeType,
+        target_id: str,
+        created_at,
+        write_lost_code: str,
     ) -> None:
         row = con.execute(
             """
@@ -549,18 +554,16 @@ class PostgreSQLEvidenceRepository:
               AND target_id = %s
             """,
             (
-                link.claim_id,
-                link.relation.value,
-                link.evidence_id,
+                source_id,
+                relation.value,
+                target_id,
             ),
         ).fetchone()
 
         if row is None:
-            raise RepositoryWriteError(
-                "IDM-W511: CLAIM_EVIDENCE_EDGE_WRITE_LOST"
-            )
+            raise RepositoryWriteError(write_lost_code)
 
-        if row[0] != link.created_at:
+        if row[0] != created_at:
             raise RepositoryWriteError(
                 "IDM-W506: EDGE_CONTENT_COLLISION"
             )
@@ -632,7 +635,81 @@ class PostgreSQLEvidenceRepository:
                 if result.rowcount == 0:
                     self._assert_existing_edge_matches(
                         con,
-                        link=link,
+                        source_id=link.claim_id,
+                        relation=link.relation,
+                        target_id=link.evidence_id,
+                        created_at=link.created_at,
+                        write_lost_code=(
+                            "IDM-W511: CLAIM_EVIDENCE_EDGE_WRITE_LOST"
+                        ),
+                    )
+
+    def add_metric_evidence_link(
+        self,
+        link: MetricEvidenceLink,
+    ) -> None:
+        validate_metric_evidence_link(link)
+
+        edge = Edge(
+            source_id=link.metric_id,
+            source_type=NodeType.METRIC,
+            edge_type=link.relation,
+            target_id=link.evidence_id,
+            target_type=NodeType.EVIDENCE,
+        )
+        validate_edge(edge)
+
+        with self.connect() as con:
+            with con.transaction():
+                self._assert_edge_endpoint(
+                    con,
+                    node_id=link.metric_id,
+                    expected_type=NodeType.METRIC,
+                    missing_code="IDM-W507: EDGE_SOURCE_NOT_FOUND",
+                    mismatch_code="IDM-W509: EDGE_SOURCE_TYPE_MISMATCH",
+                )
+
+                self._assert_edge_endpoint(
+                    con,
+                    node_id=link.evidence_id,
+                    expected_type=NodeType.EVIDENCE,
+                    missing_code="IDM-W508: EDGE_TARGET_NOT_FOUND",
+                    mismatch_code="IDM-W510: EDGE_TARGET_TYPE_MISMATCH",
+                )
+
+                result = con.execute(
+                    """
+                    INSERT INTO domain_edges (
+                        source_id,
+                        source_type,
+                        edge_type,
+                        target_id,
+                        target_type,
+                        created_at
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    ON CONFLICT DO NOTHING
+                    """,
+                    (
+                        link.metric_id,
+                        NodeType.METRIC.value,
+                        link.relation.value,
+                        link.evidence_id,
+                        NodeType.EVIDENCE.value,
+                        link.created_at,
+                    ),
+                )
+
+                if result.rowcount == 0:
+                    self._assert_existing_edge_matches(
+                        con,
+                        source_id=link.metric_id,
+                        relation=link.relation,
+                        target_id=link.evidence_id,
+                        created_at=link.created_at,
+                        write_lost_code=(
+                            "IDM-W518: METRIC_EVIDENCE_EDGE_WRITE_LOST"
+                        ),
                     )
 
     @staticmethod

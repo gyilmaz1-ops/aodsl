@@ -90,6 +90,7 @@ def test_initial_schema_is_version_one_and_valid():
         EDGE_ENDPOINT_TYPES,
         INITIAL_SCHEMA,
         METRIC_FACTS,
+        ADD_METRIC_EVIDENCE_EDGES,
         MIGRATIONS,
     )
 
@@ -101,8 +102,9 @@ def test_initial_schema_is_version_one_and_valid():
         EDGE_CREATED_AT,
         EDGE_ENDPOINT_TYPES,
         METRIC_FACTS,
+        ADD_METRIC_EVIDENCE_EDGES,
     )
-    assert CURRENT_SCHEMA_VERSION == 4
+    assert CURRENT_SCHEMA_VERSION == 5
 
     validate_migrations(MIGRATIONS)
 
@@ -370,6 +372,7 @@ def test_edge_created_at_migration_is_version_two():
         EDGE_ENDPOINT_TYPES,
         INITIAL_SCHEMA,
         METRIC_FACTS,
+        ADD_METRIC_EVIDENCE_EDGES,
         MIGRATIONS,
     )
 
@@ -380,8 +383,9 @@ def test_edge_created_at_migration_is_version_two():
         EDGE_CREATED_AT,
         EDGE_ENDPOINT_TYPES,
         METRIC_FACTS,
+        ADD_METRIC_EVIDENCE_EDGES,
     )
-    assert CURRENT_SCHEMA_VERSION == 4
+    assert CURRENT_SCHEMA_VERSION == 5
 
 
 def test_edge_created_at_migration_preserves_v1_schema():

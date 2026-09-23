@@ -7,6 +7,7 @@ import time
 import pytest
 
 from investment_domain.postgres_migrations import (
+    ADD_METRIC_EVIDENCE_EDGES,
     CURRENT_SCHEMA_VERSION,
     EDGE_CREATED_AT,
     EDGE_ENDPOINT_TYPES,
@@ -104,6 +105,11 @@ def test_live_initial_migration_and_idempotent_restart():
                 4,
                 METRIC_FACTS.name,
                 METRIC_FACTS.checksum,
+            ),
+            (
+                5,
+                ADD_METRIC_EVIDENCE_EDGES.name,
+                ADD_METRIC_EVIDENCE_EDGES.checksum,
             ),
         ]
 

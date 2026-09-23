@@ -285,11 +285,45 @@ CREATE TABLE metric_facts (
 )
 
 
+ADD_METRIC_EVIDENCE_EDGES = Migration(
+    version=5,
+    name="add_metric_evidence_edges",
+    statements=(
+        """
+ALTER TABLE domain_edges
+    DROP CONSTRAINT domain_edges_source_type
+""".strip(),
+        """
+ALTER TABLE domain_edges
+    ADD CONSTRAINT domain_edges_source_relation_target_type
+        CHECK (
+            target_type = 'Evidence'
+            AND (
+                (
+                    source_type = 'Claim'
+                    AND edge_type IN (
+                        'SUPPORTED_BY',
+                        'CONTRADICTED_BY'
+                    )
+                )
+                OR
+                (
+                    source_type = 'Metric'
+                    AND edge_type = 'SUPPORTED_BY'
+                )
+            )
+        )
+""".strip(),
+    ),
+)
+
+
 MIGRATIONS = (
     INITIAL_SCHEMA,
     EDGE_CREATED_AT,
     EDGE_ENDPOINT_TYPES,
     METRIC_FACTS,
+    ADD_METRIC_EVIDENCE_EDGES,
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 
