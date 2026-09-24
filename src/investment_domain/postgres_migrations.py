@@ -346,6 +346,33 @@ CREATE UNIQUE INDEX metric_one_successor_per_predecessor
 )
 
 
+CALCULATION_FACTS = Migration(
+    version=7,
+    name="add_calculation_facts",
+    statements=(
+        """
+CREATE TABLE calculation_facts (
+    node_id TEXT PRIMARY KEY,
+    node_type TEXT NOT NULL DEFAULT 'Calculation',
+    subject_id TEXT NOT NULL,
+    formula TEXT NOT NULL,
+    input_ids TEXT[] NOT NULL,
+    value NUMERIC NOT NULL,
+    unit TEXT NOT NULL,
+    currency TEXT NULL,
+    model_version TEXT NOT NULL,
+    CONSTRAINT calculation_node_type
+        CHECK (node_type = 'Calculation'),
+    CONSTRAINT calculation_domain_node_fk
+        FOREIGN KEY (node_id, node_type)
+        REFERENCES domain_nodes(id, node_type)
+        ON DELETE RESTRICT
+)
+""".strip(),
+    ),
+)
+
+
 MIGRATIONS = (
     INITIAL_SCHEMA,
     EDGE_CREATED_AT,
@@ -353,6 +380,7 @@ MIGRATIONS = (
     METRIC_FACTS,
     ADD_METRIC_EVIDENCE_EDGES,
     METRIC_REVISION_CONSTRAINTS,
+    CALCULATION_FACTS,
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 

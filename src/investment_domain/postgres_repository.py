@@ -5,6 +5,7 @@ import json
 from decimal import Decimal
 
 from .canonical import canonical_json, canonical_sha256
+from .calculations import validate_calculation
 from .claims import (
     ClaimEvidenceLink,
     eligible_claim_evidence,
@@ -17,7 +18,7 @@ from .metrics import (
     metric_revision_key,
     validate_metric_evidence_link,
 )
-from .nodes import Claim, Evidence, Metric
+from .nodes import Calculation, Claim, Evidence, Metric
 from .temporal import active_revision_at
 from .types import NodeType
 from .validation import validate_edge, validate_node
@@ -462,6 +463,161 @@ class PostgreSQLEvidenceRepository:
             raise RepositoryWriteError(
                 "IDM-W515: REVISION_BRANCH_FORBIDDEN"
             )
+
+    @staticmethod
+    def _assert_calculation_projection_matches(
+        con,
+        calculation: Calculation,
+    ) -> None:
+        row = con.execute(
+            """
+            SELECT
+                node_type,
+                subject_id,
+                formula,
+                input_ids,
+                value,
+                unit,
+                currency,
+                model_version
+            FROM calculation_facts
+            WHERE node_id = %s
+            """,
+            (calculation.id,),
+        ).fetchone()
+
+        if row is None:
+            raise RepositoryWriteError(
+                "IDM-W521: CALCULATION_PROJECTION_WRITE_LOST"
+            )
+
+        expected = (
+            calculation.node_type.value,
+            calculation.subject_id,
+            calculation.formula,
+            list(calculation.input_ids),
+            calculation.value,
+            calculation.unit,
+            calculation.currency,
+            calculation.model_version,
+        )
+
+        actual = (
+            str(row[0]),
+            str(row[1]),
+            str(row[2]),
+            list(row[3]),
+            row[4],
+            str(row[5]),
+            str(row[6]) if row[6] is not None else None,
+            str(row[7]),
+        )
+
+        if actual != expected:
+            raise RepositoryWriteError(
+                "IDM-W522: CALCULATION_PROJECTION_MISMATCH"
+            )
+
+    def add_calculation(
+        self,
+        calculation: Calculation,
+    ) -> None:
+        validate_node(calculation)
+        validate_calculation(calculation)
+
+        payload, payload_hash = self._payload(calculation)
+
+        with self.connect() as con:
+            with con.transaction():
+                node_exists = (
+                    con.execute(
+                        """
+                        SELECT 1
+                        FROM domain_nodes
+                        WHERE id = %s
+                        """,
+                        (calculation.id,),
+                    ).fetchone()
+                    is not None
+                )
+
+                projection_exists = (
+                    con.execute(
+                        """
+                        SELECT 1
+                        FROM calculation_facts
+                        WHERE node_id = %s
+                        """,
+                        (calculation.id,),
+                    ).fetchone()
+                    is not None
+                )
+
+                if node_exists and not projection_exists:
+                    raise RepositoryWriteError(
+                        "IDM-W521: CALCULATION_PROJECTION_WRITE_LOST"
+                    )
+
+                if projection_exists and not node_exists:
+                    raise RepositoryWriteError(
+                        "IDM-W523: CALCULATION_ORPHAN_PROJECTION"
+                    )
+
+                if node_exists:
+                    self._assert_existing_node_matches(
+                        con,
+                        node_id=calculation.id,
+                        node_type=calculation.node_type.value,
+                        payload=payload,
+                        payload_hash=payload_hash,
+                    )
+                    self._assert_calculation_projection_matches(
+                        con,
+                        calculation,
+                    )
+                    return
+
+                self._insert_domain_node(
+                    con,
+                    node_id=calculation.id,
+                    node_type=calculation.node_type.value,
+                    payload=payload,
+                    payload_hash=payload_hash,
+                )
+
+                result = con.execute(
+                    """
+                    INSERT INTO calculation_facts (
+                        node_id,
+                        node_type,
+                        subject_id,
+                        formula,
+                        input_ids,
+                        value,
+                        unit,
+                        currency,
+                        model_version
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (node_id) DO NOTHING
+                    """,
+                    (
+                        calculation.id,
+                        calculation.node_type.value,
+                        calculation.subject_id,
+                        calculation.formula,
+                        list(calculation.input_ids),
+                        calculation.value,
+                        calculation.unit,
+                        calculation.currency,
+                        calculation.model_version,
+                    ),
+                )
+
+                if result.rowcount != 1:
+                    raise RepositoryWriteError(
+                        "IDM-W521: CALCULATION_PROJECTION_WRITE_LOST"
+                    )
 
     def add_metric(self, metric: Metric) -> None:
         validate_node(metric)

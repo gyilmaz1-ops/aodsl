@@ -98,7 +98,7 @@ def test_initial_schema_is_version_one_and_valid():
     assert INITIAL_SCHEMA.version == 1
     assert INITIAL_SCHEMA.name == "initial_evidence_store"
     assert EDGE_CREATED_AT.version == 2
-    assert MIGRATIONS == (
+    assert MIGRATIONS[:6] == (
         INITIAL_SCHEMA,
         EDGE_CREATED_AT,
         EDGE_ENDPOINT_TYPES,
@@ -106,7 +106,6 @@ def test_initial_schema_is_version_one_and_valid():
         ADD_METRIC_EVIDENCE_EDGES,
         METRIC_REVISION_CONSTRAINTS,
     )
-    assert CURRENT_SCHEMA_VERSION == 6
 
     validate_migrations(MIGRATIONS)
 
@@ -381,7 +380,7 @@ def test_edge_created_at_migration_is_version_two():
 
     assert EDGE_CREATED_AT.version == 2
     assert EDGE_CREATED_AT.name == "add_edge_created_at"
-    assert MIGRATIONS == (
+    assert MIGRATIONS[:6] == (
         INITIAL_SCHEMA,
         EDGE_CREATED_AT,
         EDGE_ENDPOINT_TYPES,
@@ -389,7 +388,6 @@ def test_edge_created_at_migration_is_version_two():
         ADD_METRIC_EVIDENCE_EDGES,
         METRIC_REVISION_CONSTRAINTS,
     )
-    assert CURRENT_SCHEMA_VERSION == 6
 
 
 def test_edge_created_at_migration_preserves_v1_schema():

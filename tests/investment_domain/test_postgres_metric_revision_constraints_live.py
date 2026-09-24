@@ -2,6 +2,7 @@ import os
 
 import pytest
 
+from investment_domain.postgres_migrations import METRIC_REVISION_CONSTRAINTS
 from investment_domain.postgres_migrations import (
     CURRENT_SCHEMA_VERSION,
     PostgreSQLMigrationManager,
@@ -48,7 +49,8 @@ def _index_names(con):
 
 
 def test_metric_revision_constraints_are_schema_v6(con):
-    assert CURRENT_SCHEMA_VERSION == 6
+    assert METRIC_REVISION_CONSTRAINTS.version == 6
+    assert CURRENT_SCHEMA_VERSION >= METRIC_REVISION_CONSTRAINTS.version
 
     constraints = _constraint_names(con)
     indexes = _index_names(con)
