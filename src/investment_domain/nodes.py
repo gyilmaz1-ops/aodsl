@@ -83,6 +83,7 @@ class Calculation:
     value: Decimal
     unit: str
     model_version: str
+    currency: Optional[str] = None
     node_type: NodeType = field(default=NodeType.CALCULATION, init=False)
 
 
