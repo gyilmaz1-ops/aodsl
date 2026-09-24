@@ -678,16 +678,24 @@ def test_metric_pit_read_is_pure(repo):
 
 
 def test_metric_supersedes_id_does_not_trigger_revision_traversal(repo):
-    predecessor = revenue_metric("metric-predecessor")
+    predecessor = revenue_metric("metric-revision")
 
     successor = revenue_metric(
-        "metric-successor",
+        "metric-revision",
+        value=Decimal("105.00"),
+        observed_at=utc(2026, 9, 1, 10, 15),
+        published_at=utc(2026, 9, 1, 10, 30),
+        ingested_at=utc(2026, 9, 1, 11),
+        source_version="2",
         supersedes_id=predecessor.id,
     )
     evidence = make_evidence("metric-successor")
 
     # IDM-005D reconstructs supersedes_id but does not resolve
-    # Metric revision lineage. The predecessor is deliberately absent.
+    # Metric revision lineage. IDM-005E requires the explicit predecessor
+    # to exist at write time, but this read remains scoped to the concrete
+    # successor revision.
+    repo.add_metric(predecessor)
     _add_metric_evidence(repo, successor, evidence)
 
     assert repo.evidence_for_metric_at(

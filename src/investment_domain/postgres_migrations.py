@@ -318,12 +318,41 @@ ALTER TABLE domain_edges
 )
 
 
+METRIC_REVISION_CONSTRAINTS = Migration(
+    version=6,
+    name="add_metric_revision_constraints",
+    statements=(
+        """
+ALTER TABLE metric_facts
+    ADD CONSTRAINT metric_supersedes_fk
+        FOREIGN KEY (supersedes_id)
+        REFERENCES metric_facts(node_id)
+        ON DELETE RESTRICT
+""".strip(),
+        """
+ALTER TABLE metric_facts
+    ADD CONSTRAINT metric_no_self_supersession
+        CHECK (
+            supersedes_id IS NULL
+            OR supersedes_id <> node_id
+        )
+""".strip(),
+        """
+CREATE UNIQUE INDEX metric_one_successor_per_predecessor
+    ON metric_facts (supersedes_id)
+    WHERE supersedes_id IS NOT NULL
+""".strip(),
+    ),
+)
+
+
 MIGRATIONS = (
     INITIAL_SCHEMA,
     EDGE_CREATED_AT,
     EDGE_ENDPOINT_TYPES,
     METRIC_FACTS,
     ADD_METRIC_EVIDENCE_EDGES,
+    METRIC_REVISION_CONSTRAINTS,
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 

@@ -42,6 +42,13 @@ class EvidenceRepository(Protocol):
     ) -> None:
         ...
 
+    def active_metric_at(
+        self,
+        metric_id: str,
+        research_cutoff: datetime,
+    ) -> Metric | None:
+        ...
+
     def evidence_for_metric_at(
         self,
         metric_id: str,

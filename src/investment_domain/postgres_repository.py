@@ -14,9 +14,11 @@ from .edges import Edge, EdgeType
 from .metrics import (
     MetricEvidenceLink,
     eligible_metric_evidence,
+    metric_revision_key,
     validate_metric_evidence_link,
 )
 from .nodes import Claim, Evidence, Metric
+from .temporal import active_revision_at
 from .types import NodeType
 from .validation import validate_edge, validate_node
 
@@ -298,12 +300,181 @@ class PostgreSQLEvidenceRepository:
                 "IDM-W517: METRIC_PROJECTION_MISMATCH"
             )
 
+    @staticmethod
+    def _assert_metric_revision_predecessor_integrity(
+        *,
+        metric: Metric,
+        stored_payload,
+        stored_hash,
+        projection_row,
+    ) -> None:
+        try:
+            actual_hash = canonical_sha256(stored_payload)
+            reconstructed_payload = json.loads(
+                canonical_json(metric)
+            )
+        except (TypeError, ValueError) as exc:
+            raise RepositoryWriteError(
+                "IDM-W520: "
+                "METRIC_REVISION_PREDECESSOR_INTEGRITY_FAILURE"
+            ) from exc
+
+        expected_projection = (
+            metric.node_type.value,
+            metric.id,
+            metric.subject_id,
+            metric.name,
+            metric.value,
+            metric.unit,
+            metric.currency,
+            metric.period_start,
+            metric.period_end,
+            metric.effective_at,
+            metric.observed_at,
+            metric.published_at,
+            metric.ingested_at,
+            metric.source_id,
+            metric.source_version,
+            metric.supersedes_id,
+        )
+
+        if (
+            actual_hash != str(stored_hash)
+            or reconstructed_payload != stored_payload
+            or tuple(projection_row) != expected_projection
+        ):
+            raise RepositoryWriteError(
+                "IDM-W520: "
+                "METRIC_REVISION_PREDECESSOR_INTEGRITY_FAILURE"
+            )
+
+    @staticmethod
+    def _validate_metric_revision_append(
+        con,
+        metric: Metric,
+    ) -> None:
+        predecessor = con.execute(
+            """
+            SELECT
+                d.canonical_payload,
+                d.payload_hash,
+                m.node_type,
+                m.node_id,
+                m.subject_id,
+                m.name,
+                m.value,
+                m.unit,
+                m.currency,
+                m.period_start,
+                m.period_end,
+                m.effective_at,
+                m.observed_at,
+                m.published_at,
+                m.ingested_at,
+                m.source_id,
+                m.source_version,
+                m.supersedes_id
+            FROM metric_facts AS m
+            LEFT JOIN domain_nodes AS d
+              ON d.id = m.node_id
+             AND d.node_type = m.node_type
+            WHERE m.node_id = %s
+            FOR UPDATE OF m
+            """,
+            (metric.supersedes_id,),
+        ).fetchone()
+
+        if predecessor is None:
+            raise RepositoryWriteError(
+                "IDM-W512: REVISION_PREDECESSOR_NOT_FOUND"
+            )
+
+        if predecessor[0] is None or predecessor[1] is None:
+            raise RepositoryWriteError(
+                "IDM-W520: "
+                "METRIC_REVISION_PREDECESSOR_INTEGRITY_FAILURE"
+            )
+
+        try:
+            predecessor_metric = Metric(
+                id=str(predecessor[3]),
+                subject_id=str(predecessor[4]),
+                name=str(predecessor[5]),
+                value=predecessor[6],
+                unit=str(predecessor[7]),
+                currency=(
+                    str(predecessor[8])
+                    if predecessor[8] is not None
+                    else None
+                ),
+                period_start=predecessor[9],
+                period_end=predecessor[10],
+                effective_at=predecessor[11],
+                observed_at=predecessor[12],
+                published_at=predecessor[13],
+                ingested_at=predecessor[14],
+                source_id=str(predecessor[15]),
+                source_version=str(predecessor[16]),
+                supersedes_id=(
+                    str(predecessor[17])
+                    if predecessor[17] is not None
+                    else None
+                ),
+            )
+        except (TypeError, ValueError) as exc:
+            raise RepositoryWriteError(
+                "IDM-W520: "
+                "METRIC_REVISION_PREDECESSOR_INTEGRITY_FAILURE"
+            ) from exc
+
+        PostgreSQLEvidenceRepository._assert_metric_revision_predecessor_integrity(
+            metric=predecessor_metric,
+            stored_payload=predecessor[0],
+            stored_hash=predecessor[1],
+            projection_row=predecessor[2:],
+        )
+
+        if metric_revision_key(metric) != metric_revision_key(
+            predecessor_metric
+        ):
+            raise RepositoryWriteError(
+                "IDM-W519: METRIC_REVISION_KEY_MISMATCH"
+            )
+
+        if metric.ingested_at <= predecessor_metric.ingested_at:
+            raise RepositoryWriteError(
+                "IDM-W514: NON_MONOTONIC_REVISION_INGESTION"
+            )
+
+        successor = con.execute(
+            """
+            SELECT node_id
+            FROM metric_facts
+            WHERE supersedes_id = %s
+            """,
+            (metric.supersedes_id,),
+        ).fetchone()
+
+        if (
+            successor is not None
+            and str(successor[0]) != metric.id
+        ):
+            raise RepositoryWriteError(
+                "IDM-W515: REVISION_BRANCH_FORBIDDEN"
+            )
+
     def add_metric(self, metric: Metric) -> None:
         validate_node(metric)
         payload, payload_hash = self._payload(metric)
 
         with self.connect() as con:
             with con.transaction():
+                if metric.supersedes_id is not None:
+                    self._validate_metric_revision_append(
+                        con,
+                        metric,
+                    )
+
                 self._insert_domain_node(
                     con,
                     node_id=metric.id,
@@ -813,6 +984,237 @@ class PostgreSQLEvidenceRepository:
             raise RepositoryReadError(
                 "IDM-R510: STORED_METRIC_INTEGRITY_FAILURE"
             )
+
+    def active_metric_at(
+        self,
+        metric_id: str,
+        research_cutoff: datetime,
+    ) -> Metric | None:
+        if (
+            research_cutoff.tzinfo is None
+            or research_cutoff.utcoffset() is None
+        ):
+            raise ValueError(
+                "research_cutoff must be timezone-aware"
+            )
+
+        if (
+            not isinstance(metric_id, str)
+            or not metric_id.startswith("metric:")
+            or metric_id == "metric:"
+        ):
+            raise ValueError(
+                "metric_id must reference Metric"
+            )
+
+        with self.connect() as con:
+            anchor_row = con.execute(
+                """
+                SELECT
+                    node_type
+                FROM domain_nodes
+                WHERE id = %s
+                """,
+                (metric_id,),
+            ).fetchone()
+
+            if anchor_row is None:
+                raise RepositoryReadError(
+                    "IDM-R506: METRIC_NOT_FOUND"
+                )
+
+            if str(anchor_row[0]) != NodeType.METRIC.value:
+                raise RepositoryReadError(
+                    "IDM-R507: METRIC_TYPE_MISMATCH"
+                )
+
+            anchor_projection = con.execute(
+                """
+                SELECT node_id
+                FROM metric_facts
+                WHERE node_id = %s
+                """,
+                (metric_id,),
+            ).fetchone()
+
+            if anchor_projection is None:
+                raise RepositoryReadError(
+                    "IDM-R508: METRIC_PROJECTION_NOT_FOUND"
+                )
+
+            rows = con.execute(
+                """
+                WITH RECURSIVE
+                ancestors(node_id, supersedes_id) AS (
+                    SELECT
+                        m.node_id,
+                        m.supersedes_id
+                    FROM metric_facts AS m
+                    WHERE m.node_id = %s
+
+                    UNION
+
+                    SELECT
+                        parent.node_id,
+                        parent.supersedes_id
+                    FROM metric_facts AS parent
+                    JOIN ancestors AS child
+                      ON parent.node_id = child.supersedes_id
+                ),
+                roots(node_id) AS (
+                    SELECT DISTINCT
+                        a.node_id
+                    FROM ancestors AS a
+                    WHERE a.supersedes_id IS NULL
+                ),
+                descendants(node_id) AS (
+                    SELECT
+                        r.node_id
+                    FROM roots AS r
+
+                    UNION
+
+                    SELECT
+                        child.node_id
+                    FROM metric_facts AS child
+                    JOIN descendants AS parent
+                      ON child.supersedes_id = parent.node_id
+                )
+                SELECT
+                    m.node_id,
+                    m.node_type,
+                    m.subject_id,
+                    m.name,
+                    m.value,
+                    m.unit,
+                    m.currency,
+                    m.period_start,
+                    m.period_end,
+                    m.effective_at,
+                    m.observed_at,
+                    m.published_at,
+                    m.ingested_at,
+                    m.source_id,
+                    m.source_version,
+                    m.supersedes_id,
+                    n.node_type,
+                    n.canonical_payload,
+                    n.payload_hash
+                FROM descendants AS d
+                JOIN metric_facts AS m
+                  ON m.node_id = d.node_id
+                LEFT JOIN domain_nodes AS n
+                  ON n.id = m.node_id
+                ORDER BY m.node_id
+                """,
+                (metric_id,),
+            ).fetchall()
+
+            if not rows:
+                raise RepositoryReadError(
+                    "IDM-R510: STORED_METRIC_INTEGRITY_FAILURE"
+                )
+
+            metrics = []
+
+            for row in rows:
+                if row[16] is None:
+                    raise RepositoryReadError(
+                        "IDM-R510: STORED_METRIC_INTEGRITY_FAILURE"
+                    )
+
+                if str(row[16]) != NodeType.METRIC.value:
+                    raise RepositoryReadError(
+                        "IDM-R510: STORED_METRIC_INTEGRITY_FAILURE"
+                    )
+
+                payload = row[17]
+
+                try:
+                    if not isinstance(payload, dict):
+                        raise TypeError(
+                            "canonical Metric payload must be an object"
+                        )
+
+                    metric = Metric(
+                        id=str(row[0]),
+                        subject_id=payload["subject_id"],
+                        name=payload["name"],
+                        value=Decimal(str(payload["value"])),
+                        unit=payload["unit"],
+                        currency=payload.get("currency"),
+                        period_start=self._parse_metric_payload_datetime(
+                            payload.get("period_start"),
+                            optional=True,
+                        ),
+                        period_end=self._parse_metric_payload_datetime(
+                            payload["period_end"]
+                        ),
+                        effective_at=self._parse_metric_payload_datetime(
+                            payload["effective_at"]
+                        ),
+                        observed_at=self._parse_metric_payload_datetime(
+                            payload["observed_at"]
+                        ),
+                        published_at=self._parse_metric_payload_datetime(
+                            payload["published_at"]
+                        ),
+                        ingested_at=self._parse_metric_payload_datetime(
+                            payload["ingested_at"]
+                        ),
+                        source_id=payload["source_id"],
+                        source_version=payload["source_version"],
+                        supersedes_id=payload.get("supersedes_id"),
+                    )
+                    validate_node(metric)
+                except RepositoryReadError:
+                    raise
+                except (
+                    KeyError,
+                    TypeError,
+                    ValueError,
+                    ArithmeticError,
+                ) as exc:
+                    raise RepositoryReadError(
+                        "IDM-R509: INVALID_STORED_METRIC_PAYLOAD"
+                    ) from exc
+
+                projection_row = (
+                    row[1],
+                    row[2],
+                    row[3],
+                    row[4],
+                    row[5],
+                    row[6],
+                    row[7],
+                    row[8],
+                    row[9],
+                    row[10],
+                    row[11],
+                    row[12],
+                    row[13],
+                    row[14],
+                    row[15],
+                )
+
+                self._assert_stored_metric_integrity(
+                    metric=metric,
+                    stored_payload=payload,
+                    stored_hash=row[18],
+                    projection_row=projection_row,
+                )
+
+                metrics.append(metric)
+
+            try:
+                return active_revision_at(
+                    metrics,
+                    research_cutoff,
+                )
+            except ValueError as exc:
+                raise RepositoryReadError(
+                    "IDM-R510: STORED_METRIC_INTEGRITY_FAILURE"
+                ) from exc
 
     def evidence_for_metric_at(
         self,

@@ -3,7 +3,7 @@ from __future__ import annotations
 import inspect
 
 from investment_domain.edges import EdgeType
-from investment_domain.postgres_migrations import MIGRATIONS
+from investment_domain.postgres_migrations import ADD_METRIC_EVIDENCE_EDGES
 from investment_domain.postgres_repository import PostgreSQLEvidenceRepository
 from investment_domain.repository import EvidenceRepository
 
@@ -25,7 +25,7 @@ def test_postgres_repository_exposes_add_metric_evidence_link():
 
 
 def test_schema_v5_adds_metric_evidence_edges():
-    migration = MIGRATIONS[-1]
+    migration = ADD_METRIC_EVIDENCE_EDGES
 
     assert migration.version == 5
     assert migration.name == "add_metric_evidence_edges"
@@ -33,7 +33,7 @@ def test_schema_v5_adds_metric_evidence_edges():
 
 def test_v5_allows_only_canonical_metric_evidence_relation():
     sql = " ".join(
-        "\n".join(MIGRATIONS[-1].statements).split()
+        "\n".join(ADD_METRIC_EVIDENCE_EDGES.statements).split()
     )
 
     assert "source_type = 'Claim'" in sql

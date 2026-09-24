@@ -232,3 +232,46 @@ def eligible_metric_evidence(
             ),
         )
     )
+
+
+def metric_revision_key(metric: Metric) -> tuple:
+    """Return the fields that must remain invariant across Metric revisions.
+
+    Revision lineage is explicit through supersedes_id. This key validates
+    whether two explicitly linked Metric nodes describe the same measurement;
+    it must never be used to discover or infer lineage.
+    """
+    return (
+        metric.subject_id,
+        metric.name,
+        metric.period_start,
+        metric.period_end,
+        metric.unit,
+        metric.currency,
+        metric.source_id,
+    )
+
+
+def validate_metric_revision(
+    predecessor: Metric,
+    successor: Metric,
+) -> None:
+    """Validate one explicit predecessor -> successor Metric revision."""
+
+    if successor.supersedes_id == successor.id:
+        raise ValueError("Metric revision cannot supersede itself")
+
+    if successor.supersedes_id != predecessor.id:
+        raise ValueError(
+            "Metric revision supersedes_id must reference predecessor"
+        )
+
+    if metric_revision_key(successor) != metric_revision_key(predecessor):
+        raise ValueError(
+            "Metric revision key must match predecessor"
+        )
+
+    if successor.ingested_at <= predecessor.ingested_at:
+        raise ValueError(
+            "Metric revision must be ingested after predecessor"
+        )

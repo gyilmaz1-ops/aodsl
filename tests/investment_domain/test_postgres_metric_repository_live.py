@@ -225,16 +225,17 @@ def test_instant_metric_preserves_null_period_start(repo):
     assert row[7] == metric.period_end
 
 
-# MP013
-def test_supersedes_id_persists_without_revision_enforcement(repo):
+# MP013 was superseded by IDM-005E Metric revision enforcement.
+def test_supersedes_id_requires_existing_revision_predecessor(repo):
     metric = revenue_metric(
         supersedes_id="metric:not-present-in-database",
     )
 
-    repo.add_metric(metric)
-
-    row = fetch_metric_projection(repo, metric.id)
-    assert row[14] == "metric:not-present-in-database"
+    with pytest.raises(
+        RepositoryWriteError,
+        match="IDM-W512: REVISION_PREDECESSOR_NOT_FOUND",
+    ):
+        repo.add_metric(metric)
 
 
 # MP014
