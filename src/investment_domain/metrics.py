@@ -3,8 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
+from typing import Iterable
 
 from .edges import EdgeType
+from .nodes import Evidence, Metric
+from .temporal import active_revision_at, available_at
 from .types import NodeType
 
 
@@ -90,3 +93,142 @@ def validate_metric_evidence_link(
         raise ValueError(
             "MetricEvidenceLink.created_at must be timezone-aware"
         )
+
+
+def eligible_metric_evidence(
+    metric: Metric,
+    evidence: Iterable[Evidence],
+    links: Iterable[MetricEvidenceLink],
+    research_cutoff: datetime,
+) -> tuple[Evidence, ...]:
+    """Resolve explicitly linked, active evidence at a historical cutoff.
+
+    The Metric itself must be available at the cutoff. A superseded
+    Evidence revision does not remain eligible once its successor becomes
+    available. Metric provenance is not inherited by a successor: the
+    active Evidence revision must itself have an explicit link.
+
+    Missing references, duplicate links, malformed revision chains and
+    mixed-Metric input fail closed.
+    """
+    if (
+        research_cutoff.tzinfo is None
+        or research_cutoff.utcoffset() is None
+    ):
+        raise ValueError("research_cutoff must be timezone-aware")
+
+    if not available_at(metric, research_cutoff):
+        return ()
+
+    evidence_nodes = list(evidence)
+    evidence_by_id: dict[str, Evidence] = {}
+
+    for node in evidence_nodes:
+        if node.id in evidence_by_id:
+            raise ValueError("duplicate evidence identity")
+        evidence_by_id[node.id] = node
+
+    # Build Evidence revision components from explicit supersedes_id
+    # relationships. source_id must not define revision lineage.
+    adjacency: dict[str, set[str]] = {
+        node.id: set()
+        for node in evidence_nodes
+    }
+
+    for node in evidence_nodes:
+        if node.supersedes_id is None:
+            continue
+
+        predecessor = evidence_by_id.get(node.supersedes_id)
+        if predecessor is None:
+            raise ValueError(
+                "revision supersedes_id is outside supplied evidence set"
+            )
+
+        adjacency[node.id].add(predecessor.id)
+        adjacency[predecessor.id].add(node.id)
+
+    active_ids: set[str] = set()
+    visited: set[str] = set()
+
+    for node in evidence_nodes:
+        if node.id in visited:
+            continue
+
+        component_ids: set[str] = set()
+        stack = [node.id]
+
+        while stack:
+            current_id = stack.pop()
+
+            if current_id in component_ids:
+                continue
+
+            component_ids.add(current_id)
+            visited.add(current_id)
+            stack.extend(
+                adjacency[current_id] - component_ids
+            )
+
+        component = [
+            evidence_by_id[node_id]
+            for node_id in component_ids
+        ]
+
+        active = active_revision_at(
+            component,
+            research_cutoff,
+        )
+
+        if active is not None:
+            active_ids.add(active.id)
+
+    seen_links: set[tuple[str, str, EdgeType]] = set()
+    result: list[Evidence] = []
+
+    for link in links:
+        validate_metric_evidence_link(link)
+
+        if link.metric_id != metric.id:
+            raise ValueError(
+                "MetricEvidenceLink belongs to a different metric"
+            )
+
+        key = (
+            link.metric_id,
+            link.evidence_id,
+            link.relation,
+        )
+
+        if key in seen_links:
+            raise ValueError(
+                "duplicate metric-evidence link"
+            )
+
+        seen_links.add(key)
+
+        node = evidence_by_id.get(link.evidence_id)
+
+        if node is None:
+            raise ValueError(
+                "MetricEvidenceLink references missing Evidence"
+            )
+
+        if link.created_at > research_cutoff:
+            continue
+
+        if node.id not in active_ids:
+            continue
+
+        result.append(node)
+
+    return tuple(
+        sorted(
+            result,
+            key=lambda node: (
+                node.ingested_at,
+                node.published_at,
+                node.id,
+            ),
+        )
+    )

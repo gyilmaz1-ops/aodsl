@@ -42,6 +42,13 @@ class EvidenceRepository(Protocol):
     ) -> None:
         ...
 
+    def evidence_for_metric_at(
+        self,
+        metric_id: str,
+        research_cutoff: datetime,
+    ) -> tuple[Evidence, ...]:
+        ...
+
     def evidence_for_claim_at(
         self,
         claim_id: str,

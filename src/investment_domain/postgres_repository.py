@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 
+from decimal import Decimal
+
 from .canonical import canonical_json, canonical_sha256
 from .claims import (
     ClaimEvidenceLink,
@@ -9,7 +11,11 @@ from .claims import (
     validate_claim_evidence_link,
 )
 from .edges import Edge, EdgeType
-from .metrics import MetricEvidenceLink, validate_metric_evidence_link
+from .metrics import (
+    MetricEvidenceLink,
+    eligible_metric_evidence,
+    validate_metric_evidence_link,
+)
 from .nodes import Claim, Evidence, Metric
 from .types import NodeType
 from .validation import validate_edge, validate_node
@@ -733,6 +739,377 @@ class PostgreSQLEvidenceRepository:
         ):
             raise RepositoryReadError(
                 "IDM-R505: STORED_NODE_INTEGRITY_FAILURE"
+            )
+
+    @staticmethod
+    def _parse_metric_payload_datetime(
+        value,
+        *,
+        optional: bool = False,
+    ):
+        from datetime import datetime
+
+        if value is None and optional:
+            return None
+
+        if isinstance(value, datetime):
+            return value
+
+        if not isinstance(value, str):
+            raise RepositoryReadError(
+                "IDM-R509: INVALID_STORED_METRIC_PAYLOAD"
+            )
+
+        try:
+            return datetime.fromisoformat(
+                value.replace("Z", "+00:00")
+            )
+        except ValueError as exc:
+            raise RepositoryReadError(
+                "IDM-R509: INVALID_STORED_METRIC_PAYLOAD"
+            ) from exc
+
+    @staticmethod
+    def _assert_stored_metric_integrity(
+        *,
+        metric: Metric,
+        stored_payload,
+        stored_hash,
+        projection_row,
+    ) -> None:
+        try:
+            actual_hash = canonical_sha256(stored_payload)
+            reconstructed_payload = json.loads(
+                canonical_json(metric)
+            )
+        except (TypeError, ValueError) as exc:
+            raise RepositoryReadError(
+                "IDM-R510: STORED_METRIC_INTEGRITY_FAILURE"
+            ) from exc
+
+        expected_projection = (
+            metric.node_type.value,
+            metric.subject_id,
+            metric.name,
+            metric.value,
+            metric.unit,
+            metric.currency,
+            metric.period_start,
+            metric.period_end,
+            metric.effective_at,
+            metric.observed_at,
+            metric.published_at,
+            metric.ingested_at,
+            metric.source_id,
+            metric.source_version,
+            metric.supersedes_id,
+        )
+
+        if (
+            actual_hash != str(stored_hash)
+            or reconstructed_payload != stored_payload
+            or tuple(projection_row) != expected_projection
+        ):
+            raise RepositoryReadError(
+                "IDM-R510: STORED_METRIC_INTEGRITY_FAILURE"
+            )
+
+    def evidence_for_metric_at(
+        self,
+        metric_id: str,
+        research_cutoff: datetime,
+    ) -> tuple[Evidence, ...]:
+        if (
+            research_cutoff.tzinfo is None
+            or research_cutoff.utcoffset() is None
+        ):
+            raise ValueError(
+                "research_cutoff must be timezone-aware"
+            )
+
+        if (
+            not isinstance(metric_id, str)
+            or not metric_id.startswith("metric:")
+            or metric_id == "metric:"
+        ):
+            raise ValueError(
+                "metric_id must reference Metric"
+            )
+
+        with self.connect() as con:
+            metric_row = con.execute(
+                """
+                SELECT
+                    node_type,
+                    canonical_payload,
+                    payload_hash
+                FROM domain_nodes
+                WHERE id = %s
+                """,
+                (metric_id,),
+            ).fetchone()
+
+            if metric_row is None:
+                raise RepositoryReadError(
+                    "IDM-R506: METRIC_NOT_FOUND"
+                )
+
+            if str(metric_row[0]) != NodeType.METRIC.value:
+                raise RepositoryReadError(
+                    "IDM-R507: METRIC_TYPE_MISMATCH"
+                )
+
+            projection_row = con.execute(
+                """
+                SELECT
+                    node_type,
+                    subject_id,
+                    name,
+                    value,
+                    unit,
+                    currency,
+                    period_start,
+                    period_end,
+                    effective_at,
+                    observed_at,
+                    published_at,
+                    ingested_at,
+                    source_id,
+                    source_version,
+                    supersedes_id
+                FROM metric_facts
+                WHERE node_id = %s
+                """,
+                (metric_id,),
+            ).fetchone()
+
+            if projection_row is None:
+                raise RepositoryReadError(
+                    "IDM-R508: METRIC_PROJECTION_NOT_FOUND"
+                )
+
+            metric_payload = metric_row[1]
+
+            try:
+                if not isinstance(metric_payload, dict):
+                    raise TypeError(
+                        "canonical Metric payload must be an object"
+                    )
+
+                metric = Metric(
+                    id=metric_id,
+                    subject_id=metric_payload["subject_id"],
+                    name=metric_payload["name"],
+                    value=Decimal(str(metric_payload["value"])),
+                    unit=metric_payload["unit"],
+                    currency=metric_payload.get("currency"),
+                    period_start=self._parse_metric_payload_datetime(
+                        metric_payload.get("period_start"),
+                        optional=True,
+                    ),
+                    period_end=self._parse_metric_payload_datetime(
+                        metric_payload["period_end"]
+                    ),
+                    effective_at=self._parse_metric_payload_datetime(
+                        metric_payload["effective_at"]
+                    ),
+                    observed_at=self._parse_metric_payload_datetime(
+                        metric_payload["observed_at"]
+                    ),
+                    published_at=self._parse_metric_payload_datetime(
+                        metric_payload["published_at"]
+                    ),
+                    ingested_at=self._parse_metric_payload_datetime(
+                        metric_payload["ingested_at"]
+                    ),
+                    source_id=metric_payload["source_id"],
+                    source_version=metric_payload["source_version"],
+                    supersedes_id=metric_payload.get(
+                        "supersedes_id"
+                    ),
+                )
+                validate_node(metric)
+            except RepositoryReadError:
+                raise
+            except (
+                KeyError,
+                TypeError,
+                ValueError,
+                ArithmeticError,
+            ) as exc:
+                raise RepositoryReadError(
+                    "IDM-R509: INVALID_STORED_METRIC_PAYLOAD"
+                ) from exc
+
+            self._assert_stored_metric_integrity(
+                metric=metric,
+                stored_payload=metric_payload,
+                stored_hash=metric_row[2],
+                projection_row=projection_row,
+            )
+
+            link_rows = con.execute(
+                """
+                SELECT
+                    target_id,
+                    edge_type,
+                    created_at
+                FROM domain_edges
+                WHERE source_id = %s
+                  AND source_type = 'Metric'
+                  AND edge_type = 'SUPPORTED_BY'
+                  AND target_type = 'Evidence'
+                ORDER BY target_id, edge_type
+                """,
+                (metric_id,),
+            ).fetchall()
+
+            if not link_rows:
+                return ()
+
+            linked_ids = {
+                str(row[0])
+                for row in link_rows
+            }
+
+            evidence_rows = con.execute(
+                """
+                WITH RECURSIVE
+                ancestors(node_id, supersedes_id) AS (
+                    SELECT
+                        e.node_id,
+                        e.supersedes_id
+                    FROM evidence_facts AS e
+                    WHERE e.node_id = ANY(%s)
+
+                    UNION
+
+                    SELECT
+                        parent.node_id,
+                        parent.supersedes_id
+                    FROM evidence_facts AS parent
+                    JOIN ancestors AS child
+                      ON parent.node_id = child.supersedes_id
+                ),
+                roots(node_id) AS (
+                    SELECT DISTINCT
+                        a.node_id
+                    FROM ancestors AS a
+                    WHERE a.supersedes_id IS NULL
+                ),
+                descendants(node_id) AS (
+                    SELECT
+                        r.node_id
+                    FROM roots AS r
+
+                    UNION
+
+                    SELECT
+                        child.node_id
+                    FROM evidence_facts AS child
+                    JOIN descendants AS parent
+                      ON child.supersedes_id = parent.node_id
+                )
+                SELECT
+                    e.node_id,
+                    e.source_id,
+                    e.source_version,
+                    e.content_hash,
+                    e.effective_at,
+                    e.observed_at,
+                    e.published_at,
+                    e.ingested_at,
+                    e.supersedes_id,
+                    e.source_uri,
+                    n.node_type,
+                    n.canonical_payload,
+                    n.payload_hash
+                FROM evidence_facts AS e
+                JOIN descendants AS d
+                  ON d.node_id = e.node_id
+                JOIN domain_nodes AS n
+                  ON n.id = e.node_id
+                ORDER BY e.node_id
+                """,
+                (list(linked_ids),),
+            ).fetchall()
+
+            try:
+                evidence = tuple(
+                    Evidence(
+                        id=str(row[0]),
+                        source_id=str(row[1]),
+                        source_version=str(row[2]),
+                        content_hash=str(row[3]),
+                        effective_at=row[4],
+                        observed_at=row[5],
+                        published_at=row[6],
+                        ingested_at=row[7],
+                        supersedes_id=(
+                            str(row[8])
+                            if row[8] is not None
+                            else None
+                        ),
+                        source_uri=(
+                            str(row[9])
+                            if row[9] is not None
+                            else None
+                        ),
+                    )
+                    for row in evidence_rows
+                )
+            except (TypeError, ValueError, IndexError) as exc:
+                raise RepositoryReadError(
+                    "IDM-R505: STORED_NODE_INTEGRITY_FAILURE"
+                ) from exc
+
+            for node, row in zip(evidence, evidence_rows):
+                try:
+                    validate_node(node)
+                except ValueError as exc:
+                    raise RepositoryReadError(
+                        "IDM-R505: STORED_NODE_INTEGRITY_FAILURE"
+                    ) from exc
+
+                if str(row[10]) != NodeType.EVIDENCE.value:
+                    raise RepositoryReadError(
+                        "IDM-R505: STORED_NODE_INTEGRITY_FAILURE"
+                    )
+
+                self._assert_stored_node_integrity(
+                    node=node,
+                    stored_payload=row[11],
+                    stored_hash=row[12],
+                )
+
+            evidence_ids = {
+                node.id
+                for node in evidence
+            }
+
+            if not linked_ids.issubset(evidence_ids):
+                raise RepositoryReadError(
+                    "IDM-R503: LINKED_EVIDENCE_NOT_FOUND"
+                )
+
+            links = tuple(
+                MetricEvidenceLink(
+                    metric_id=metric_id,
+                    evidence_id=str(row[0]),
+                    relation=EdgeType(str(row[1])),
+                    created_at=row[2],
+                )
+                for row in link_rows
+            )
+
+            for link in links:
+                validate_metric_evidence_link(link)
+
+            return eligible_metric_evidence(
+                metric,
+                evidence,
+                links,
+                research_cutoff,
             )
 
     def evidence_for_claim_at(
