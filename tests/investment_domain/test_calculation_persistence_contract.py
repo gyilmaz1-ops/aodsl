@@ -4,8 +4,8 @@ from investment_domain.postgres_migrations import (
 )
 
 
-def test_calculation_persistence_is_schema_version_7():
-    assert CURRENT_SCHEMA_VERSION == 7
+def test_calculation_persistence_is_schema_version_8():
+    assert CURRENT_SCHEMA_VERSION == 8
 
 
 def test_schema_contains_calculation_facts_migration():

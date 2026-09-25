@@ -373,6 +373,72 @@ CREATE TABLE calculation_facts (
 )
 
 
+
+CALCULATION_INPUT_PROVENANCE = Migration(
+    version=8,
+    name="add_calculation_input_provenance",
+    statements=(
+        """
+ALTER TABLE domain_edges
+    DROP CONSTRAINT domain_edges_type
+""".strip(),
+        """
+ALTER TABLE domain_edges
+    ADD CONSTRAINT domain_edges_type
+        CHECK (
+            edge_type IN (
+                'SUPPORTED_BY',
+                'CONTRADICTED_BY',
+                'DERIVED_FROM'
+            )
+        )
+""".strip(),
+        """
+ALTER TABLE domain_edges
+    DROP CONSTRAINT domain_edges_target_type
+""".strip(),
+        """
+ALTER TABLE domain_edges
+    ADD CONSTRAINT domain_edges_target_type
+        CHECK (
+            target_type IN (
+                'Evidence',
+                'Metric',
+                'Calculation'
+            )
+        )
+""".strip(),
+        """
+ALTER TABLE domain_edges
+    DROP CONSTRAINT domain_edges_source_relation_target_type
+""".strip(),
+        """
+ALTER TABLE domain_edges
+    ADD CONSTRAINT domain_edges_source_relation_target_type
+        CHECK (
+            (
+                source_type = 'Claim'
+                AND edge_type IN ('SUPPORTED_BY', 'CONTRADICTED_BY')
+                AND target_type = 'Evidence'
+            )
+            OR
+            (
+                source_type = 'Metric'
+                AND edge_type = 'SUPPORTED_BY'
+                AND target_type = 'Evidence'
+            )
+            OR
+            (
+                source_type = 'Calculation'
+                AND edge_type = 'DERIVED_FROM'
+                AND target_type IN ('Metric', 'Calculation')
+            )
+        )
+""".strip(),
+    ),
+)
+
+
 MIGRATIONS = (
     INITIAL_SCHEMA,
     EDGE_CREATED_AT,
@@ -381,6 +447,7 @@ MIGRATIONS = (
     ADD_METRIC_EVIDENCE_EDGES,
     METRIC_REVISION_CONSTRAINTS,
     CALCULATION_FACTS,
+    CALCULATION_INPUT_PROVENANCE,
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 

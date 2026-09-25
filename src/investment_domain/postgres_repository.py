@@ -12,6 +12,7 @@ from .claims import (
     validate_claim_evidence_link,
 )
 from .edges import Edge, EdgeType
+from .identity import is_canonical_content_id
 from .metrics import (
     MetricEvidenceLink,
     eligible_metric_evidence,
@@ -617,6 +618,292 @@ class PostgreSQLEvidenceRepository:
                 if result.rowcount != 1:
                     raise RepositoryWriteError(
                         "IDM-W521: CALCULATION_PROJECTION_WRITE_LOST"
+                    )
+
+    @staticmethod
+    def _calculation_dependency_reaches(
+        con,
+        *,
+        start_id: str,
+        sought_id: str,
+    ) -> bool:
+        """
+        Return True when an existing Calculation->Calculation DERIVED_FROM
+        path from start_id reaches sought_id.
+
+        A recursive SQL traversal is used instead of Python row-order
+        traversal. UNION (not UNION ALL) makes pre-existing cycles finite.
+        """
+        row = con.execute(
+            """
+            WITH RECURSIVE reachable(node_id) AS (
+                SELECT %s::text
+
+                UNION
+
+                SELECT e.target_id
+                FROM domain_edges e
+                JOIN reachable r
+                  ON e.source_id = r.node_id
+                WHERE e.source_type = 'Calculation'
+                  AND e.edge_type = 'DERIVED_FROM'
+                  AND e.target_type = 'Calculation'
+            )
+            SELECT 1
+            FROM reachable
+            WHERE node_id = %s
+            LIMIT 1
+            """,
+            (start_id, sought_id),
+        ).fetchone()
+        return row is not None
+
+    def add_calculation_inputs(
+        self,
+        calculation_id: str,
+    ) -> None:
+        if not isinstance(calculation_id, str) or not calculation_id.strip():
+            raise ValueError("calculation_id must not be empty")
+        if not is_canonical_content_id(calculation_id, kind="calculation"):
+            raise ValueError(
+                "calculation_id must be a canonical Calculation ID"
+            )
+
+        with self.connect() as con:
+            with con.transaction():
+                source = con.execute(
+                    """
+                    SELECT node_type
+                    FROM domain_nodes
+                    WHERE id = %s
+                    FOR UPDATE
+                    """,
+                    (calculation_id,),
+                ).fetchone()
+
+                if source is None:
+                    raise RepositoryWriteError(
+                        "IDM-W507: EDGE_SOURCE_NOT_FOUND"
+                    )
+
+                if str(source[0]) != "Calculation":
+                    raise RepositoryWriteError(
+                        "IDM-W509: EDGE_SOURCE_TYPE_MISMATCH"
+                    )
+
+                projection = con.execute(
+                    """
+                    SELECT
+                        node_type,
+                        subject_id,
+                        formula,
+                        input_ids,
+                        value,
+                        unit,
+                        currency,
+                        model_version
+                    FROM calculation_facts
+                    WHERE node_id = %s
+                    """,
+                    (calculation_id,),
+                ).fetchone()
+
+                if projection is None:
+                    raise RepositoryWriteError(
+                        "IDM-W526: CALCULATION_SOURCE_PROJECTION_NOT_FOUND"
+                    )
+
+                try:
+                    persisted_calculation = Calculation(
+                        id=calculation_id,
+                        subject_id=projection[1],
+                        formula=projection[2],
+                        input_ids=tuple(projection[3]),
+                        value=projection[4],
+                        unit=projection[5],
+                        currency=projection[6],
+                        model_version=projection[7],
+                    )
+                    validate_node(persisted_calculation)
+                    validate_calculation(persisted_calculation)
+                except (TypeError, ValueError) as exc:
+                    raise RepositoryWriteError(
+                        "IDM-W522: CALCULATION_PROJECTION_MISMATCH"
+                    ) from exc
+
+                payload, payload_hash = self._payload(
+                    persisted_calculation
+                )
+                self._assert_existing_node_matches(
+                    con,
+                    node_id=persisted_calculation.id,
+                    node_type=persisted_calculation.node_type.value,
+                    payload=payload,
+                    payload_hash=payload_hash,
+                )
+                self._assert_calculation_projection_matches(
+                    con,
+                    persisted_calculation,
+                )
+
+                input_ids = persisted_calculation.input_ids
+
+                # Calculation validation already guarantees non-empty,
+                # duplicate-free input_ids at write time. Persistent state
+                # must nevertheless be treated fail-closed.
+                if not input_ids or len(input_ids) != len(set(input_ids)):
+                    raise RepositoryWriteError(
+                        "IDM-W524: CALCULATION_INPUT_SET_MISMATCH"
+                    )
+
+                targets = {}
+                for target_id in input_ids:
+                    target = con.execute(
+                        """
+                        SELECT node_type
+                        FROM domain_nodes
+                        WHERE id = %s
+                        """,
+                        (target_id,),
+                    ).fetchone()
+
+                    if target is None:
+                        raise RepositoryWriteError(
+                            "IDM-W508: EDGE_TARGET_NOT_FOUND"
+                        )
+
+                    target_type = str(target[0])
+                    if target_type not in ("Metric", "Calculation"):
+                        raise RepositoryWriteError(
+                            "IDM-W510: EDGE_TARGET_TYPE_MISMATCH"
+                        )
+
+                    if target_id == calculation_id:
+                        raise RepositoryWriteError(
+                            "IDM-W525: CALCULATION_DEPENDENCY_CYCLE"
+                        )
+
+                    targets[target_id] = target_type
+
+                existing_rows = con.execute(
+                    """
+                    SELECT target_id, target_type
+                    FROM domain_edges
+                    WHERE source_id = %s
+                      AND source_type = 'Calculation'
+                      AND edge_type = 'DERIVED_FROM'
+                    ORDER BY target_id
+                    """,
+                    (calculation_id,),
+                ).fetchall()
+
+                existing = {
+                    (str(row[0]), str(row[1]))
+                    for row in existing_rows
+                }
+                expected = {
+                    (target_id, targets[target_id])
+                    for target_id in input_ids
+                }
+
+                # Legal states:
+                #   empty -> complete aggregate write
+                #   exact complete set -> idempotent replay
+                # Any partial, extra, wrong-type or otherwise divergent set
+                # is persistent-state corruption and is never repaired.
+                if existing:
+                    if existing != expected or len(existing_rows) != len(expected):
+                        raise RepositoryWriteError(
+                            "IDM-W524: CALCULATION_INPUT_SET_MISMATCH"
+                        )
+
+                    # Replay must still fail closed if the persisted graph has
+                    # become cyclic through repository-external corruption.
+                    for target_id, target_type in expected:
+                        if (
+                            target_type == "Calculation"
+                            and self._calculation_dependency_reaches(
+                                con,
+                                start_id=target_id,
+                                sought_id=calculation_id,
+                            )
+                        ):
+                            raise RepositoryWriteError(
+                                "IDM-W525: CALCULATION_DEPENDENCY_CYCLE"
+                            )
+                    return
+
+                # Validate the entire aggregate before the first edge insert.
+                # Therefore missing endpoints/cycles cannot leave a partial
+                # provenance set.
+                for target_id in input_ids:
+                    if targets[target_id] != "Calculation":
+                        continue
+
+                    if self._calculation_dependency_reaches(
+                        con,
+                        start_id=target_id,
+                        sought_id=calculation_id,
+                    ):
+                        raise RepositoryWriteError(
+                            "IDM-W525: CALCULATION_DEPENDENCY_CYCLE"
+                        )
+
+                for target_id in input_ids:
+                    result = con.execute(
+                        """
+                        INSERT INTO domain_edges (
+                            source_id,
+                            source_type,
+                            edge_type,
+                            target_id,
+                            target_type,
+                            created_at
+                        )
+                        VALUES (
+                            %s,
+                            'Calculation',
+                            'DERIVED_FROM',
+                            %s,
+                            %s,
+                            CURRENT_TIMESTAMP
+                        )
+                        ON CONFLICT DO NOTHING
+                        """,
+                        (
+                            calculation_id,
+                            target_id,
+                            targets[target_id],
+                        ),
+                    )
+
+                    if result.rowcount != 1:
+                        raise RepositoryWriteError(
+                            "IDM-W524: CALCULATION_INPUT_SET_MISMATCH"
+                        )
+
+                persisted_rows = con.execute(
+                    """
+                    SELECT target_id, target_type
+                    FROM domain_edges
+                    WHERE source_id = %s
+                      AND source_type = 'Calculation'
+                      AND edge_type = 'DERIVED_FROM'
+                    """,
+                    (calculation_id,),
+                ).fetchall()
+
+                persisted = {
+                    (str(row[0]), str(row[1]))
+                    for row in persisted_rows
+                }
+
+                if (
+                    persisted != expected
+                    or len(persisted_rows) != len(expected)
+                ):
+                    raise RepositoryWriteError(
+                        "IDM-W524: CALCULATION_INPUT_SET_MISMATCH"
                     )
 
     def add_metric(self, metric: Metric) -> None:

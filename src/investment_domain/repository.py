@@ -36,6 +36,12 @@ class EvidenceRepository(Protocol):
     ) -> None:
         ...
 
+    def add_calculation_inputs(
+        self,
+        calculation_id: str,
+    ) -> None:
+        ...
+
     def add_claim_evidence_link(
         self,
         link: ClaimEvidenceLink,
