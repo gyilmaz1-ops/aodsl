@@ -20,7 +20,7 @@ from .metrics import (
     validate_metric_evidence_link,
 )
 from .nodes import Calculation, Claim, Evidence, Metric
-from .temporal import active_revision_at
+from .temporal import active_revision_at, available_at
 from .types import NodeType
 from .validation import validate_edge, validate_node
 
@@ -1427,6 +1427,334 @@ class PostgreSQLEvidenceRepository:
             raise RepositoryReadError(
                 "IDM-R510: STORED_METRIC_INTEGRITY_FAILURE"
             )
+
+
+    def _load_exact_calculation(
+        self,
+        con,
+        calculation_id: str,
+    ) -> Calculation:
+        row = con.execute(
+            """
+            SELECT
+                n.node_type,
+                n.canonical_payload,
+                n.payload_hash,
+                c.node_type,
+                c.subject_id,
+                c.formula,
+                c.input_ids,
+                c.value,
+                c.unit,
+                c.currency,
+                c.model_version
+            FROM domain_nodes AS n
+            LEFT JOIN calculation_facts AS c
+              ON c.node_id = n.id
+            WHERE n.id = %s
+            """,
+            (calculation_id,),
+        ).fetchone()
+
+        if row is None:
+            raise RepositoryReadError(
+                "Calculation persistent state not found"
+            )
+
+        if str(row[0]) != NodeType.CALCULATION.value:
+            raise RepositoryReadError(
+                "Calculation persistent node type mismatch"
+            )
+
+        if row[3] is None:
+            raise RepositoryReadError(
+                "Calculation projection not found"
+            )
+
+        try:
+            calculation = Calculation(
+                id=calculation_id,
+                subject_id=row[4],
+                formula=row[5],
+                input_ids=tuple(row[6]),
+                value=row[7],
+                unit=row[8],
+                currency=row[9],
+                model_version=row[10],
+            )
+            validate_node(calculation)
+            validate_calculation(calculation)
+        except (TypeError, ValueError) as exc:
+            raise RepositoryReadError(
+                "Invalid stored Calculation projection"
+            ) from exc
+
+        if str(row[3]) != NodeType.CALCULATION.value:
+            raise RepositoryReadError(
+                "Calculation projection type mismatch"
+            )
+
+        self._assert_stored_node_integrity(
+            node=calculation,
+            stored_payload=row[1],
+            stored_hash=row[2],
+        )
+
+        expected_projection = (
+            calculation.node_type.value,
+            calculation.subject_id,
+            calculation.formula,
+            list(calculation.input_ids),
+            calculation.value,
+            calculation.unit,
+            calculation.currency,
+            calculation.model_version,
+        )
+
+        actual_projection = (
+            str(row[3]),
+            str(row[4]),
+            str(row[5]),
+            list(row[6]),
+            row[7],
+            str(row[8]),
+            str(row[9]) if row[9] is not None else None,
+            str(row[10]),
+        )
+
+        if actual_projection != expected_projection:
+            raise RepositoryReadError(
+                "Stored Calculation projection mismatch"
+            )
+
+        return calculation
+
+    def _load_exact_metric(
+        self,
+        con,
+        metric_id: str,
+    ) -> Metric:
+        row = con.execute(
+            """
+            SELECT
+                m.node_id,
+                m.node_type,
+                m.subject_id,
+                m.name,
+                m.value,
+                m.unit,
+                m.currency,
+                m.period_start,
+                m.period_end,
+                m.effective_at,
+                m.observed_at,
+                m.published_at,
+                m.ingested_at,
+                m.source_id,
+                m.source_version,
+                m.supersedes_id,
+                n.node_type,
+                n.canonical_payload,
+                n.payload_hash
+            FROM domain_nodes AS n
+            LEFT JOIN metric_facts AS m
+              ON m.node_id = n.id
+            WHERE n.id = %s
+            """,
+            (metric_id,),
+        ).fetchone()
+
+        if row is None:
+            raise RepositoryReadError(
+                "Metric dependency persistent state not found"
+            )
+
+        if str(row[16]) != NodeType.METRIC.value:
+            raise RepositoryReadError(
+                "Metric dependency node type mismatch"
+            )
+
+        if row[0] is None:
+            raise RepositoryReadError(
+                "Metric dependency projection not found"
+            )
+
+        if str(row[1]) != NodeType.METRIC.value:
+            raise RepositoryReadError(
+                "Metric dependency projection type mismatch"
+            )
+
+        try:
+            metric = Metric(
+                id=str(row[0]),
+                subject_id=row[2],
+                name=row[3],
+                value=row[4],
+                unit=row[5],
+                currency=row[6],
+                period_start=row[7],
+                period_end=row[8],
+                effective_at=row[9],
+                observed_at=row[10],
+                published_at=row[11],
+                ingested_at=row[12],
+                source_id=row[13],
+                source_version=row[14],
+                supersedes_id=row[15],
+            )
+            validate_node(metric)
+        except (TypeError, ValueError) as exc:
+            raise RepositoryReadError(
+                "Invalid stored Metric dependency"
+            ) from exc
+
+        self._assert_stored_metric_integrity(
+            metric=metric,
+            stored_payload=row[17],
+            stored_hash=row[18],
+            projection_row=row[1:16],
+        )
+
+        return metric
+
+    def _calculation_visible_at(
+        self,
+        con,
+        calculation_id: str,
+        research_cutoff: datetime,
+        visiting: set[str],
+    ) -> tuple[Calculation, bool]:
+        if calculation_id in visiting:
+            raise RepositoryReadError(
+                "Calculation dependency cycle detected"
+            )
+
+        calculation = self._load_exact_calculation(
+            con,
+            calculation_id,
+        )
+
+        edge_rows = con.execute(
+            """
+            SELECT
+                target_id,
+                target_type,
+                created_at
+            FROM domain_edges
+            WHERE source_id = %s
+              AND source_type = 'Calculation'
+              AND edge_type = 'DERIVED_FROM'
+            ORDER BY target_id
+            """,
+            (calculation_id,),
+        ).fetchall()
+
+        expected = set(calculation.input_ids)
+        actual = {str(row[0]) for row in edge_rows}
+
+        if (
+            actual != expected
+            or len(edge_rows) != len(expected)
+        ):
+            raise RepositoryReadError(
+                "Calculation input provenance set mismatch"
+            )
+
+        edges_by_target = {
+            str(row[0]): row
+            for row in edge_rows
+        }
+
+        visiting.add(calculation_id)
+
+        try:
+            for input_id in calculation.input_ids:
+                edge = edges_by_target[input_id]
+                target_type = str(edge[1])
+
+                if target_type == NodeType.METRIC.value:
+                    # Persistent integrity is established before PIT
+                    # visibility is evaluated.
+                    metric = self._load_exact_metric(
+                        con,
+                        input_id,
+                    )
+
+                    if edge[2] > research_cutoff:
+                        return calculation, False
+
+                    if not available_at(
+                        metric,
+                        research_cutoff,
+                    ):
+                        return calculation, False
+
+                elif target_type == NodeType.CALCULATION.value:
+                    # Establish exact dependency aggregate integrity before
+                    # PIT visibility. Its provenance closure, however, is
+                    # traversed only when this parent edge is visible at the
+                    # research cutoff.
+                    self._load_exact_calculation(
+                        con,
+                        input_id,
+                    )
+
+                    if edge[2] > research_cutoff:
+                        return calculation, False
+
+                    _, child_visible = self._calculation_visible_at(
+                        con,
+                        input_id,
+                        research_cutoff,
+                        visiting,
+                    )
+
+                    if not child_visible:
+                        return calculation, False
+
+                else:
+                    raise RepositoryReadError(
+                        "Invalid Calculation dependency type"
+                    )
+
+            return calculation, True
+
+        finally:
+            visiting.remove(calculation_id)
+
+    def calculation_at(
+        self,
+        calculation_id: str,
+        research_cutoff: datetime,
+    ) -> Calculation | None:
+        if not is_canonical_content_id(
+            calculation_id,
+            kind="calculation",
+        ):
+            raise ValueError(
+                "calculation_id must be a canonical Calculation ID"
+            )
+
+        if (
+            research_cutoff.tzinfo is None
+            or research_cutoff.utcoffset() is None
+        ):
+            raise ValueError(
+                "research_cutoff must be timezone-aware"
+            )
+
+        with self.connect() as con:
+            calculation, visible = self._calculation_visible_at(
+                con,
+                calculation_id,
+                research_cutoff,
+                set(),
+            )
+
+            if not visible:
+                return None
+
+            return calculation
 
     def active_metric_at(
         self,

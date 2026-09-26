@@ -42,6 +42,13 @@ class EvidenceRepository(Protocol):
     ) -> None:
         ...
 
+    def calculation_at(
+        self,
+        calculation_id: str,
+        research_cutoff: datetime,
+    ) -> Calculation | None:
+        ...
+
     def add_claim_evidence_link(
         self,
         link: ClaimEvidenceLink,
