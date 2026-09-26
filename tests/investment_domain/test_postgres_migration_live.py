@@ -17,6 +17,7 @@ from investment_domain.postgres_migrations import (
     ESTIMATE_INPUT_PROVENANCE,
     INITIAL_SCHEMA,
     VALUATION_FACTS,
+    VALUATION_DEPENDENCIES,
     MIGRATION_HISTORY_TABLE,
     METRIC_FACTS,
     METRIC_REVISION_CONSTRAINTS,
@@ -152,6 +153,11 @@ def test_live_initial_migration_and_idempotent_restart():
                 11,
                 VALUATION_FACTS.name,
                 VALUATION_FACTS.checksum,
+            ),
+            (
+                12,
+                VALUATION_DEPENDENCIES.name,
+                VALUATION_DEPENDENCIES.checksum,
             ),
         ]
 

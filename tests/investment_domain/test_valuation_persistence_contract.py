@@ -46,9 +46,19 @@ def test_valuation_facts_enforces_typed_domain_node_fk():
 
 
 def test_v11_is_append_only_after_existing_history():
-    assert [migration.version for migration in MIGRATIONS] == list(
-        range(1, 12)
-    )
+    history_through_v11 = [
+        migration
+        for migration in MIGRATIONS
+        if migration.version <= 11
+    ]
+
+    assert [
+        migration.version
+        for migration in history_through_v11
+    ] == list(range(1, 12))
+
+    assert history_through_v11[-1].version == 11
+    assert history_through_v11[-1].name == "add_valuation_facts"
 
     assert MIGRATIONS[8].name == "add_estimate_facts"
     assert MIGRATIONS[9].name == "add_estimate_input_provenance"
