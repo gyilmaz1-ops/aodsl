@@ -24,6 +24,7 @@ from .nodes import (
     Claim,
     Estimate,
     Evidence,
+    Forecast,
     Metric,
     Valuation,
 )
@@ -533,6 +534,51 @@ class PostgreSQLEvidenceRepository:
             )
 
     @staticmethod
+    def _assert_forecast_projection_matches(
+        con,
+        forecast: Forecast,
+    ) -> None:
+        row = con.execute(
+            """
+            SELECT
+                node_type,
+                subject_id,
+                scenario,
+                as_of,
+                model_version
+            FROM forecast_facts
+            WHERE node_id = %s
+            """,
+            (forecast.id,),
+        ).fetchone()
+
+        if row is None:
+            raise RepositoryWriteError(
+                "IDM-W536: FORECAST_PROJECTION_WRITE_LOST"
+            )
+
+        expected = (
+            forecast.node_type.value,
+            forecast.subject_id,
+            forecast.scenario,
+            forecast.as_of,
+            forecast.model_version,
+        )
+
+        actual = (
+            str(row[0]),
+            str(row[1]),
+            str(row[2]),
+            row[3],
+            str(row[4]),
+        )
+
+        if actual != expected:
+            raise RepositoryWriteError(
+                "IDM-W537: FORECAST_PROJECTION_MISMATCH"
+            )
+
+    @staticmethod
     def _assert_valuation_projection_matches(
         con,
         valuation: Valuation,
@@ -744,6 +790,99 @@ class PostgreSQLEvidenceRepository:
                 if result.rowcount != 1:
                     raise RepositoryWriteError(
                         "IDM-W528: ESTIMATE_PROJECTION_WRITE_LOST"
+                    )
+
+    def add_forecast(
+        self,
+        forecast: Forecast,
+    ) -> None:
+        validate_node(forecast)
+        payload, payload_hash = self._payload(forecast)
+
+        with self.connect() as con:
+            with con.transaction():
+                node_exists = (
+                    con.execute(
+                        """
+                        SELECT 1
+                        FROM domain_nodes
+                        WHERE id = %s
+                        """,
+                        (forecast.id,),
+                    ).fetchone()
+                    is not None
+                )
+
+                projection_exists = (
+                    con.execute(
+                        """
+                        SELECT 1
+                        FROM forecast_facts
+                        WHERE node_id = %s
+                        """,
+                        (forecast.id,),
+                    ).fetchone()
+                    is not None
+                )
+
+                if node_exists and not projection_exists:
+                    raise RepositoryWriteError(
+                        "IDM-W536: FORECAST_PROJECTION_WRITE_LOST"
+                    )
+
+                if projection_exists and not node_exists:
+                    raise RepositoryWriteError(
+                        "IDM-W538: FORECAST_ORPHAN_PROJECTION"
+                    )
+
+                if node_exists:
+                    self._assert_existing_node_matches(
+                        con,
+                        node_id=forecast.id,
+                        node_type=forecast.node_type.value,
+                        payload=payload,
+                        payload_hash=payload_hash,
+                    )
+                    self._assert_forecast_projection_matches(
+                        con,
+                        forecast,
+                    )
+                    return
+
+                self._insert_domain_node(
+                    con,
+                    node_id=forecast.id,
+                    node_type=forecast.node_type.value,
+                    payload=payload,
+                    payload_hash=payload_hash,
+                )
+
+                result = con.execute(
+                    """
+                    INSERT INTO forecast_facts (
+                        node_id,
+                        node_type,
+                        subject_id,
+                        scenario,
+                        as_of,
+                        model_version
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (node_id) DO NOTHING
+                    """,
+                    (
+                        forecast.id,
+                        forecast.node_type.value,
+                        forecast.subject_id,
+                        forecast.scenario,
+                        forecast.as_of,
+                        forecast.model_version,
+                    ),
+                )
+
+                if result.rowcount != 1:
+                    raise RepositoryWriteError(
+                        "IDM-W536: FORECAST_PROJECTION_WRITE_LOST"
                     )
 
     def add_valuation(

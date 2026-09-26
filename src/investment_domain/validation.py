@@ -14,6 +14,7 @@ from .nodes import (
     Company,
     Estimate,
     Evidence,
+    Forecast,
     Metric,
     Security,
     Valuation,
@@ -379,6 +380,13 @@ def validate_node(node) -> None:
             raise DomainValidationError(
                 "IDM-C001",
                 f"{node.node_type.value}.value must be Decimal",
+            )
+
+    if isinstance(node, Forecast):
+        if node.scenario not in {"BASE", "BULL", "BEAR"}:
+            raise DomainValidationError(
+                "IDM-C004",
+                "unsupported Forecast.scenario",
             )
 
     if isinstance(node, Valuation):

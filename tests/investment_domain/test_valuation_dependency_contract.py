@@ -37,7 +37,7 @@ def test_valuation_dependency_migration_is_v12():
     )
 
     assert migration.name == "add_valuation_dependencies"
-    assert CURRENT_SCHEMA_VERSION == 12
+    assert CURRENT_SCHEMA_VERSION >= 12
 
 
 def test_v12_extends_domain_edge_target_types_for_forecast():
@@ -85,6 +85,8 @@ def test_v12_does_not_create_parallel_dependency_table():
 
 
 def test_migration_versions_remain_contiguous_through_v12():
-    assert [migration.version for migration in MIGRATIONS] == list(
-        range(1, 13)
-    )
+    assert [
+        migration.version
+        for migration in MIGRATIONS
+        if migration.version <= 12
+    ] == list(range(1, 13))

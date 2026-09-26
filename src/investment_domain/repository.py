@@ -11,6 +11,7 @@ from .nodes import (
     Claim,
     Estimate,
     Evidence,
+    Forecast,
     Metric,
     Valuation,
 )
@@ -41,6 +42,12 @@ class EvidenceRepository(Protocol):
     def add_estimate(
         self,
         estimate: Estimate,
+    ) -> None:
+        ...
+
+    def add_forecast(
+        self,
+        forecast: Forecast,
     ) -> None:
         ...
 

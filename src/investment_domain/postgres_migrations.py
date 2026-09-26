@@ -638,6 +638,30 @@ ALTER TABLE domain_edges
 )
 
 
+
+FORECAST_FACTS = Migration(
+    version=13,
+    name="add_forecast_facts",
+    statements=(
+        """
+CREATE TABLE forecast_facts (
+    node_id TEXT PRIMARY KEY,
+    node_type TEXT NOT NULL DEFAULT 'Forecast',
+    subject_id TEXT NOT NULL,
+    scenario TEXT NOT NULL,
+    as_of TIMESTAMPTZ NOT NULL,
+    model_version TEXT NOT NULL,
+    CONSTRAINT forecast_node_type
+        CHECK (node_type = 'Forecast'),
+    CONSTRAINT forecast_domain_node_fk
+        FOREIGN KEY (node_id, node_type)
+        REFERENCES domain_nodes(id, node_type)
+        ON DELETE RESTRICT
+)
+""".strip(),
+    ),
+)
+
 MIGRATIONS = (
     INITIAL_SCHEMA,
     EDGE_CREATED_AT,
@@ -651,6 +675,7 @@ MIGRATIONS = (
     ESTIMATE_INPUT_PROVENANCE,
     VALUATION_FACTS,
     VALUATION_DEPENDENCIES,
+    FORECAST_FACTS,
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 

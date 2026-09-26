@@ -15,6 +15,7 @@ from investment_domain.postgres_migrations import (
     EDGE_ENDPOINT_TYPES,
     ESTIMATE_FACTS,
     ESTIMATE_INPUT_PROVENANCE,
+    FORECAST_FACTS,
     INITIAL_SCHEMA,
     VALUATION_FACTS,
     VALUATION_DEPENDENCIES,
@@ -46,6 +47,7 @@ def reset_database():
     with connect() as con:
         with con.transaction():
             con.execute("DROP TABLE IF EXISTS domain_edges CASCADE")
+            con.execute("DROP TABLE IF EXISTS forecast_facts CASCADE")
             con.execute("DROP TABLE IF EXISTS valuation_facts CASCADE")
             con.execute("DROP TABLE IF EXISTS estimate_facts CASCADE")
             con.execute("DROP TABLE IF EXISTS calculation_facts CASCADE")
@@ -87,6 +89,7 @@ def test_live_initial_migration_and_idempotent_restart():
             "calculation_facts",
             "estimate_facts",
             "valuation_facts",
+            "forecast_facts",
             MIGRATION_HISTORY_TABLE,
         } <= tables
 
@@ -158,6 +161,11 @@ def test_live_initial_migration_and_idempotent_restart():
                 12,
                 VALUATION_DEPENDENCIES.name,
                 VALUATION_DEPENDENCIES.checksum,
+            ),
+            (
+                13,
+                FORECAST_FACTS.name,
+                FORECAST_FACTS.checksum,
             ),
         ]
 
