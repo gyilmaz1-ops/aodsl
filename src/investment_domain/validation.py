@@ -88,6 +88,79 @@ def _validate_temporal(node) -> None:
                     "Evidence cannot supersede itself",
                 )
 
+    if isinstance(node, Estimate):
+        definition = metric_definition(node.metric_name)
+
+        if definition is None:
+            raise DomainValidationError(
+                "IDM-C004",
+                f"unknown Estimate.metric_name: {node.metric_name}",
+            )
+
+        expected_prefix = ID_PREFIX.get(definition.subject_type)
+        if expected_prefix is None:
+            raise DomainValidationError(
+                "IDM-C004",
+                "unsupported Estimate subject type: "
+                f"{definition.subject_type.value}",
+            )
+
+        if (
+            not node.subject_id.startswith(expected_prefix)
+            or len(node.subject_id) == len(expected_prefix)
+        ):
+            raise DomainValidationError(
+                "IDM-C004",
+                "Estimate.subject_id must reference "
+                f"{definition.subject_type.value}",
+            )
+
+        if node.unit != definition.unit:
+            raise DomainValidationError(
+                "IDM-C004",
+                f"Estimate.unit must be {definition.unit} "
+                f"for {node.metric_name}",
+            )
+
+        if definition.requires_currency:
+            if node.currency is None:
+                raise DomainValidationError(
+                    "IDM-C004",
+                    "Estimate.currency is required "
+                    f"for {node.metric_name}",
+                )
+        elif node.currency is not None:
+            raise DomainValidationError(
+                "IDM-C004",
+                "Estimate.currency is forbidden "
+                f"for {node.metric_name}",
+            )
+
+        if node.currency is not None:
+            if (
+                len(node.currency) != 3
+                or not node.currency.isascii()
+                or not node.currency.isalpha()
+                or node.currency != node.currency.upper()
+            ):
+                raise DomainValidationError(
+                    "IDM-C004",
+                    "Estimate.currency must be an uppercase "
+                    "three-letter code",
+                )
+
+        if not isinstance(node.value, Decimal):
+            raise DomainValidationError(
+                "IDM-C001",
+                "Estimate.value must be Decimal",
+            )
+
+        if not node.value.is_finite():
+            raise DomainValidationError(
+                "IDM-C001",
+                "Estimate.value must be finite",
+            )
+
     if isinstance(node, Metric):
         definition = metric_definition(node.name)
         if definition is None:
@@ -242,6 +315,18 @@ def _expected_identity(node):
             "formula": node.formula,
             "input_ids": node.input_ids,
             "model_version": node.model_version,
+        })
+    if isinstance(node, Estimate):
+        return canonical_id("estimate", {
+            "subject_id": node.subject_id,
+            "metric_name": node.metric_name,
+            "period_end": node.period_end,
+            "value": node.value,
+            "unit": node.unit,
+            "scenario": node.scenario,
+            "model_version": node.model_version,
+            "as_of": node.as_of,
+            "currency": node.currency,
         })
 
     # Remaining analytical node identities are content-addressed over all
