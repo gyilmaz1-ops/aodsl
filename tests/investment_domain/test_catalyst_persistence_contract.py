@@ -85,7 +85,7 @@ def test_v15_does_not_persist_catalyst_affects_edges():
     )[1]
 
     catalyst_section = catalyst_section.split(
-        "MIGRATIONS = (",
+        "CATALYST_AFFECTS_EDGES = Migration(",
         1,
     )[0]
 

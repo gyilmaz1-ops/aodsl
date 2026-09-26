@@ -58,6 +58,13 @@ class EvidenceRepository(Protocol):
     ) -> None:
         ...
 
+    def add_catalyst_affects(
+        self,
+        catalyst_id: str,
+        target_ids: tuple[str, ...],
+    ) -> None:
+        ...
+
     def add_forecast_estimates(
         self,
         forecast_id: str,

@@ -931,6 +931,250 @@ class PostgreSQLEvidenceRepository:
                         "IDM-W541: CATALYST_PROJECTION_WRITE_LOST"
                     )
 
+    def add_catalyst_affects(
+        self,
+        catalyst_id: str,
+        target_ids: tuple[str, ...],
+    ) -> None:
+        if not isinstance(catalyst_id, str) or not catalyst_id.strip():
+            raise ValueError("catalyst_id must not be empty")
+
+        if not is_canonical_content_id(
+            catalyst_id,
+            kind="catalyst",
+        ):
+            raise ValueError(
+                "catalyst_id must be a canonical Catalyst ID"
+            )
+
+        if not isinstance(target_ids, tuple) or not target_ids:
+            raise ValueError(
+                "target_ids must be a non-empty tuple"
+            )
+
+        if any(
+            not isinstance(target_id, str)
+            or not target_id.strip()
+            for target_id in target_ids
+        ):
+            raise ValueError(
+                "target_ids must contain non-empty strings"
+            )
+
+        if len(set(target_ids)) != len(target_ids):
+            raise ValueError(
+                "target_ids must not contain duplicates"
+            )
+
+        with self.connect() as con:
+            with con.transaction():
+                source = con.execute(
+                    """
+                    SELECT node_type
+                    FROM domain_nodes
+                    WHERE id = %s
+                    """,
+                    (catalyst_id,),
+                ).fetchone()
+
+                if source is None:
+                    raise RepositoryWriteError(
+                        "IDM-W507: EDGE_SOURCE_NOT_FOUND"
+                    )
+
+                source_type = str(source[0])
+                if source_type != NodeType.CATALYST.value:
+                    raise RepositoryWriteError(
+                        "IDM-W509: EDGE_SOURCE_TYPE_MISMATCH"
+                    )
+
+                catalyst_projection = con.execute(
+                    """
+                    SELECT
+                        node_type,
+                        subject_id,
+                        description,
+                        as_of,
+                        expected_at
+                    FROM catalyst_facts
+                    WHERE node_id = %s
+                    """,
+                    (catalyst_id,),
+                ).fetchone()
+
+                if catalyst_projection is None:
+                    raise RepositoryWriteError(
+                        "IDM-W541: CATALYST_PROJECTION_WRITE_LOST"
+                    )
+
+                try:
+                    persisted_catalyst = Catalyst(
+                        id=catalyst_id,
+                        subject_id=str(catalyst_projection[1]),
+                        description=str(catalyst_projection[2]),
+                        as_of=catalyst_projection[3],
+                        expected_at=catalyst_projection[4],
+                    )
+                    validate_node(persisted_catalyst)
+                except (TypeError, ValueError) as exc:
+                    raise RepositoryWriteError(
+                        "IDM-W542: CATALYST_PROJECTION_MISMATCH"
+                    ) from exc
+
+                payload, payload_hash = self._payload(
+                    persisted_catalyst
+                )
+
+                self._assert_existing_node_matches(
+                    con,
+                    node_id=persisted_catalyst.id,
+                    node_type=persisted_catalyst.node_type.value,
+                    payload=payload,
+                    payload_hash=payload_hash,
+                )
+
+                self._assert_catalyst_projection_matches(
+                    con,
+                    persisted_catalyst,
+                )
+
+                targets = {}
+
+                for target_id in target_ids:
+                    target = con.execute(
+                        """
+                        SELECT node_type
+                        FROM domain_nodes
+                        WHERE id = %s
+                        """,
+                        (target_id,),
+                    ).fetchone()
+
+                    if target is None:
+                        raise RepositoryWriteError(
+                            "IDM-W508: EDGE_TARGET_NOT_FOUND"
+                        )
+
+                    target_type = str(target[0])
+
+                    if target_type not in (
+                        NodeType.CLAIM.value,
+                        NodeType.FORECAST.value,
+                    ):
+                        raise RepositoryWriteError(
+                            "IDM-W510: EDGE_TARGET_TYPE_MISMATCH"
+                        )
+
+                    edge = Edge(
+                        source_id=catalyst_id,
+                        source_type=NodeType.CATALYST,
+                        edge_type=EdgeType.AFFECTS,
+                        target_id=target_id,
+                        target_type=NodeType(target_type),
+                    )
+                    validate_edge(edge)
+
+                    targets[target_id] = target_type
+
+                existing_rows = con.execute(
+                    """
+                    SELECT target_id, target_type
+                    FROM domain_edges
+                    WHERE source_id = %s
+                      AND source_type = 'Catalyst'
+                      AND edge_type = 'AFFECTS'
+                    ORDER BY target_id
+                    """,
+                    (catalyst_id,),
+                ).fetchall()
+
+                existing = {
+                    (str(row[0]), str(row[1]))
+                    for row in existing_rows
+                }
+
+                expected = {
+                    (target_id, targets[target_id])
+                    for target_id in target_ids
+                }
+
+                # Legal states:
+                #   empty -> complete aggregate write
+                #   exact complete set -> idempotent replay
+                # Any partial, extra, wrong-type or divergent set is
+                # persistent-state corruption and is never repaired.
+                if existing:
+                    if (
+                        existing != expected
+                        or len(existing_rows) != len(expected)
+                    ):
+                        raise RepositoryWriteError(
+                            "IDM-W544: "
+                            "CATALYST_AFFECTS_SET_MISMATCH"
+                        )
+                    return
+
+                # All endpoints and Catalyst AFFECTS semantics have
+                # been validated before the first write.
+                for target_id in target_ids:
+                    result = con.execute(
+                        """
+                        INSERT INTO domain_edges (
+                            source_id,
+                            source_type,
+                            edge_type,
+                            target_id,
+                            target_type,
+                            created_at
+                        )
+                        VALUES (
+                            %s,
+                            'Catalyst',
+                            'AFFECTS',
+                            %s,
+                            %s,
+                            CURRENT_TIMESTAMP
+                        )
+                        ON CONFLICT DO NOTHING
+                        """,
+                        (
+                            catalyst_id,
+                            target_id,
+                            targets[target_id],
+                        ),
+                    )
+
+                    if result.rowcount != 1:
+                        raise RepositoryWriteError(
+                            "IDM-W544: "
+                            "CATALYST_AFFECTS_SET_MISMATCH"
+                        )
+
+                persisted_rows = con.execute(
+                    """
+                    SELECT target_id, target_type
+                    FROM domain_edges
+                    WHERE source_id = %s
+                      AND source_type = 'Catalyst'
+                      AND edge_type = 'AFFECTS'
+                    """,
+                    (catalyst_id,),
+                ).fetchall()
+
+                persisted = {
+                    (str(row[0]), str(row[1]))
+                    for row in persisted_rows
+                }
+
+                if (
+                    persisted != expected
+                    or len(persisted_rows) != len(expected)
+                ):
+                    raise RepositoryWriteError(
+                        "IDM-W544: "
+                        "CATALYST_AFFECTS_SET_MISMATCH"
+                    )
+
     def add_forecast(
         self,
         forecast: Forecast,

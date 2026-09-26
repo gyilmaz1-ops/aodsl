@@ -9,6 +9,7 @@ import pytest
 from investment_domain.postgres_migrations import (
     ADD_FORECAST_COMPOSITION,
     CATALYST_FACTS,
+    CATALYST_AFFECTS_EDGES,
     ADD_METRIC_EVIDENCE_EDGES,
     CALCULATION_FACTS,
     CALCULATION_INPUT_PROVENANCE,
@@ -180,6 +181,11 @@ def test_live_initial_migration_and_idempotent_restart():
                 15,
                 CATALYST_FACTS.name,
                 CATALYST_FACTS.checksum,
+            ),
+            (
+                16,
+                CATALYST_AFFECTS_EDGES.name,
+                CATALYST_AFFECTS_EDGES.checksum,
             ),
         ]
 

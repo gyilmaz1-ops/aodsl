@@ -780,6 +780,88 @@ CREATE TABLE catalyst_facts (
 )
 
 
+CATALYST_AFFECTS_EDGES = Migration(
+    version=16,
+    name="add_catalyst_affects_edges",
+    statements=(
+        """
+ALTER TABLE domain_edges
+    DROP CONSTRAINT domain_edges_type
+""".strip(),
+        """
+ALTER TABLE domain_edges
+    ADD CONSTRAINT domain_edges_type
+        CHECK (
+            edge_type IN (
+                'SUPPORTED_BY',
+                'CONTRADICTED_BY',
+                'DERIVED_FROM',
+                'DEPENDS_ON',
+                'CONTAINS',
+                'AFFECTS'
+            )
+        )
+""".strip(),
+        """
+ALTER TABLE domain_edges
+    DROP CONSTRAINT domain_edges_source_relation_target_type
+""".strip(),
+        """
+ALTER TABLE domain_edges
+    ADD CONSTRAINT domain_edges_source_relation_target_type
+        CHECK (
+            (
+                source_type = 'Claim'
+                AND edge_type IN ('SUPPORTED_BY', 'CONTRADICTED_BY')
+                AND target_type = 'Evidence'
+            )
+            OR
+            (
+                source_type = 'Metric'
+                AND edge_type = 'SUPPORTED_BY'
+                AND target_type = 'Evidence'
+            )
+            OR
+            (
+                source_type = 'Calculation'
+                AND edge_type = 'DERIVED_FROM'
+                AND target_type IN ('Metric', 'Calculation')
+            )
+            OR
+            (
+                source_type = 'Estimate'
+                AND edge_type = 'DERIVED_FROM'
+                AND target_type IN ('Metric', 'Calculation', 'Claim')
+            )
+            OR
+            (
+                source_type = 'Valuation'
+                AND edge_type = 'DEPENDS_ON'
+                AND target_type IN (
+                    'Forecast',
+                    'Estimate',
+                    'Metric',
+                    'Calculation'
+                )
+            )
+            OR
+            (
+                source_type = 'Forecast'
+                AND edge_type = 'CONTAINS'
+                AND target_type = 'Estimate'
+            )
+            OR
+            (
+                source_type = 'Catalyst'
+                AND edge_type = 'AFFECTS'
+                AND target_type IN ('Claim', 'Forecast')
+            )
+        )
+""".strip(),
+    ),
+)
+
+
 MIGRATIONS = (
     INITIAL_SCHEMA,
     EDGE_CREATED_AT,
@@ -796,6 +878,7 @@ MIGRATIONS = (
     FORECAST_FACTS,
     ADD_FORECAST_COMPOSITION,
     CATALYST_FACTS,
+    CATALYST_AFFECTS_EDGES,
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 
