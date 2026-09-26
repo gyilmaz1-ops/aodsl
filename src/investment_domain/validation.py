@@ -381,6 +381,37 @@ def validate_node(node) -> None:
                 f"{node.node_type.value}.value must be Decimal",
             )
 
+    if isinstance(node, Valuation):
+        if not node.security_id.startswith("security:"):
+            raise DomainValidationError(
+                "IDM-C004",
+                "Valuation.security_id must reference Security",
+            )
+
+        if node.method not in {"DCF", "EV_EBITDA", "PE"}:
+            raise DomainValidationError(
+                "IDM-C004",
+                "unsupported Valuation.method",
+            )
+
+        if node.scenario not in {"BASE", "BULL", "BEAR"}:
+            raise DomainValidationError(
+                "IDM-C004",
+                "unsupported Valuation.scenario",
+            )
+
+        if not re.fullmatch(r"[A-Z]{3}", node.currency):
+            raise DomainValidationError(
+                "IDM-C004",
+                "Valuation.currency must be a 3-letter uppercase code",
+            )
+
+        if not node.value.is_finite():
+            raise DomainValidationError(
+                "IDM-C004",
+                "Valuation.value must be finite",
+            )
+
     _validate_temporal(node)
 
     expected = _expected_identity(node)
