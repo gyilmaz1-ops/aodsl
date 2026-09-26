@@ -755,6 +755,31 @@ ALTER TABLE domain_edges
     ),
 )
 
+
+CATALYST_FACTS = Migration(
+    version=15,
+    name="add_catalyst_facts",
+    statements=(
+        """
+CREATE TABLE catalyst_facts (
+    node_id TEXT PRIMARY KEY,
+    node_type TEXT NOT NULL DEFAULT 'Catalyst',
+    subject_id TEXT NOT NULL,
+    description TEXT NOT NULL,
+    as_of TIMESTAMPTZ NOT NULL,
+    expected_at TIMESTAMPTZ,
+    CONSTRAINT catalyst_node_type
+        CHECK (node_type = 'Catalyst'),
+    CONSTRAINT catalyst_domain_node_fk
+        FOREIGN KEY (node_id, node_type)
+        REFERENCES domain_nodes(id, node_type)
+        ON DELETE RESTRICT
+)
+""".strip(),
+    ),
+)
+
+
 MIGRATIONS = (
     INITIAL_SCHEMA,
     EDGE_CREATED_AT,
@@ -770,6 +795,7 @@ MIGRATIONS = (
     VALUATION_DEPENDENCIES,
     FORECAST_FACTS,
     ADD_FORECAST_COMPOSITION,
+    CATALYST_FACTS,
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 

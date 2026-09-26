@@ -21,6 +21,7 @@ from .metrics import (
 )
 from .nodes import (
     Calculation,
+    Catalyst,
     Claim,
     Estimate,
     Evidence,
@@ -534,6 +535,51 @@ class PostgreSQLEvidenceRepository:
             )
 
     @staticmethod
+    def _assert_catalyst_projection_matches(
+        con,
+        catalyst: Catalyst,
+    ) -> None:
+        row = con.execute(
+            """
+            SELECT
+                node_type,
+                subject_id,
+                description,
+                as_of,
+                expected_at
+            FROM catalyst_facts
+            WHERE node_id = %s
+            """,
+            (catalyst.id,),
+        ).fetchone()
+
+        if row is None:
+            raise RepositoryWriteError(
+                "IDM-W541: CATALYST_PROJECTION_WRITE_LOST"
+            )
+
+        actual = (
+            str(row[0]),
+            str(row[1]),
+            str(row[2]),
+            row[3],
+            row[4],
+        )
+
+        expected = (
+            catalyst.node_type.value,
+            catalyst.subject_id,
+            catalyst.description,
+            catalyst.as_of,
+            catalyst.expected_at,
+        )
+
+        if actual != expected:
+            raise RepositoryWriteError(
+                "IDM-W542: CATALYST_PROJECTION_MISMATCH"
+            )
+
+    @staticmethod
     def _assert_forecast_projection_matches(
         con,
         forecast: Forecast,
@@ -790,6 +836,99 @@ class PostgreSQLEvidenceRepository:
                 if result.rowcount != 1:
                     raise RepositoryWriteError(
                         "IDM-W528: ESTIMATE_PROJECTION_WRITE_LOST"
+                    )
+
+    def add_catalyst(
+        self,
+        catalyst: Catalyst,
+    ) -> None:
+        validate_node(catalyst)
+        payload, payload_hash = self._payload(catalyst)
+
+        with self.connect() as con:
+            with con.transaction():
+                node_exists = (
+                    con.execute(
+                        """
+                        SELECT 1
+                        FROM domain_nodes
+                        WHERE id = %s
+                        """,
+                        (catalyst.id,),
+                    ).fetchone()
+                    is not None
+                )
+
+                projection_exists = (
+                    con.execute(
+                        """
+                        SELECT 1
+                        FROM catalyst_facts
+                        WHERE node_id = %s
+                        """,
+                        (catalyst.id,),
+                    ).fetchone()
+                    is not None
+                )
+
+                if node_exists and not projection_exists:
+                    raise RepositoryWriteError(
+                        "IDM-W541: CATALYST_PROJECTION_WRITE_LOST"
+                    )
+
+                if projection_exists and not node_exists:
+                    raise RepositoryWriteError(
+                        "IDM-W543: CATALYST_ORPHAN_PROJECTION"
+                    )
+
+                if node_exists:
+                    self._assert_existing_node_matches(
+                        con,
+                        node_id=catalyst.id,
+                        node_type=catalyst.node_type.value,
+                        payload=payload,
+                        payload_hash=payload_hash,
+                    )
+                    self._assert_catalyst_projection_matches(
+                        con,
+                        catalyst,
+                    )
+                    return
+
+                self._insert_domain_node(
+                    con,
+                    node_id=catalyst.id,
+                    node_type=catalyst.node_type.value,
+                    payload=payload,
+                    payload_hash=payload_hash,
+                )
+
+                result = con.execute(
+                    """
+                    INSERT INTO catalyst_facts (
+                        node_id,
+                        node_type,
+                        subject_id,
+                        description,
+                        as_of,
+                        expected_at
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (node_id) DO NOTHING
+                    """,
+                    (
+                        catalyst.id,
+                        catalyst.node_type.value,
+                        catalyst.subject_id,
+                        catalyst.description,
+                        catalyst.as_of,
+                        catalyst.expected_at,
+                    ),
+                )
+
+                if result.rowcount != 1:
+                    raise RepositoryWriteError(
+                        "IDM-W541: CATALYST_PROJECTION_WRITE_LOST"
                     )
 
     def add_forecast(

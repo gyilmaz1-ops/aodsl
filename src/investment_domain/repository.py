@@ -11,6 +11,7 @@ from .nodes import (
     Claim,
     Estimate,
     Evidence,
+    Catalyst,
     Forecast,
     Metric,
     Valuation,
@@ -48,6 +49,12 @@ class EvidenceRepository(Protocol):
     def add_forecast(
         self,
         forecast: Forecast,
+    ) -> None:
+        ...
+
+    def add_catalyst(
+        self,
+        catalyst: Catalyst,
     ) -> None:
         ...
 
