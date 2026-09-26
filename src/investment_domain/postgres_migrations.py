@@ -525,6 +525,33 @@ ALTER TABLE domain_edges
 )
 
 
+VALUATION_FACTS = Migration(
+    version=11,
+    name="add_valuation_facts",
+    statements=(
+        """
+CREATE TABLE valuation_facts (
+    node_id TEXT PRIMARY KEY,
+    node_type TEXT NOT NULL DEFAULT 'Valuation',
+    security_id TEXT NOT NULL,
+    method TEXT NOT NULL,
+    value NUMERIC NOT NULL,
+    currency TEXT NOT NULL,
+    as_of TIMESTAMPTZ NOT NULL,
+    model_version TEXT NOT NULL,
+    scenario TEXT NOT NULL,
+    CONSTRAINT valuation_node_type
+        CHECK (node_type = 'Valuation'),
+    CONSTRAINT valuation_domain_node_fk
+        FOREIGN KEY (node_id, node_type)
+        REFERENCES domain_nodes(id, node_type)
+        ON DELETE RESTRICT
+)
+""".strip(),
+    ),
+)
+
+
 MIGRATIONS = (
     INITIAL_SCHEMA,
     EDGE_CREATED_AT,
@@ -536,6 +563,7 @@ MIGRATIONS = (
     CALCULATION_INPUT_PROVENANCE,
     ESTIMATE_FACTS,
     ESTIMATE_INPUT_PROVENANCE,
+    VALUATION_FACTS,
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 

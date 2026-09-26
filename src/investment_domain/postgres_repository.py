@@ -19,7 +19,14 @@ from .metrics import (
     metric_revision_key,
     validate_metric_evidence_link,
 )
-from .nodes import Calculation, Claim, Estimate, Evidence, Metric
+from .nodes import (
+    Calculation,
+    Claim,
+    Estimate,
+    Evidence,
+    Metric,
+    Valuation,
+)
 from .temporal import active_revision_at, available_at
 from .types import NodeType
 from .validation import validate_edge, validate_node
@@ -526,6 +533,60 @@ class PostgreSQLEvidenceRepository:
             )
 
     @staticmethod
+    def _assert_valuation_projection_matches(
+        con,
+        valuation: Valuation,
+    ) -> None:
+        row = con.execute(
+            """
+            SELECT
+                node_type,
+                security_id,
+                method,
+                value,
+                currency,
+                as_of,
+                model_version,
+                scenario
+            FROM valuation_facts
+            WHERE node_id = %s
+            """,
+            (valuation.id,),
+        ).fetchone()
+
+        if row is None:
+            raise RepositoryWriteError(
+                "IDM-W532: VALUATION_PROJECTION_WRITE_LOST"
+            )
+
+        expected = (
+            valuation.node_type.value,
+            valuation.security_id,
+            valuation.method,
+            valuation.value,
+            valuation.currency,
+            valuation.as_of,
+            valuation.model_version,
+            valuation.scenario,
+        )
+
+        actual = (
+            str(row[0]),
+            str(row[1]),
+            str(row[2]),
+            row[3],
+            str(row[4]),
+            row[5],
+            str(row[6]),
+            str(row[7]),
+        )
+
+        if actual != expected:
+            raise RepositoryWriteError(
+                "IDM-W533: VALUATION_PROJECTION_MISMATCH"
+            )
+
+    @staticmethod
     def _assert_calculation_projection_matches(
         con,
         calculation: Calculation,
@@ -683,6 +744,109 @@ class PostgreSQLEvidenceRepository:
                 if result.rowcount != 1:
                     raise RepositoryWriteError(
                         "IDM-W528: ESTIMATE_PROJECTION_WRITE_LOST"
+                    )
+
+    def add_valuation(
+        self,
+        valuation: Valuation,
+    ) -> None:
+        validate_node(valuation)
+
+        payload, payload_hash = self._payload(valuation)
+
+        with self.connect() as con:
+            with con.transaction():
+                node_exists = (
+                    con.execute(
+                        """
+                        SELECT 1
+                        FROM domain_nodes
+                        WHERE id = %s
+                        """,
+                        (valuation.id,),
+                    ).fetchone()
+                    is not None
+                )
+
+                projection_exists = (
+                    con.execute(
+                        """
+                        SELECT 1
+                        FROM valuation_facts
+                        WHERE node_id = %s
+                        """,
+                        (valuation.id,),
+                    ).fetchone()
+                    is not None
+                )
+
+                if node_exists and not projection_exists:
+                    raise RepositoryWriteError(
+                        "IDM-W532: VALUATION_PROJECTION_WRITE_LOST"
+                    )
+
+                if projection_exists and not node_exists:
+                    raise RepositoryWriteError(
+                        "IDM-W534: VALUATION_ORPHAN_PROJECTION"
+                    )
+
+                if node_exists:
+                    self._assert_existing_node_matches(
+                        con,
+                        node_id=valuation.id,
+                        node_type=valuation.node_type.value,
+                        payload=payload,
+                        payload_hash=payload_hash,
+                    )
+                    self._assert_valuation_projection_matches(
+                        con,
+                        valuation,
+                    )
+                    return
+
+                self._insert_domain_node(
+                    con,
+                    node_id=valuation.id,
+                    node_type=valuation.node_type.value,
+                    payload=payload,
+                    payload_hash=payload_hash,
+                )
+
+                result = con.execute(
+                    """
+                    INSERT INTO valuation_facts (
+                        node_id,
+                        node_type,
+                        security_id,
+                        method,
+                        value,
+                        currency,
+                        as_of,
+                        model_version,
+                        scenario
+                    )
+                    VALUES (
+                        %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s
+                    )
+                    ON CONFLICT (node_id) DO NOTHING
+                    """,
+                    (
+                        valuation.id,
+                        valuation.node_type.value,
+                        valuation.security_id,
+                        valuation.method,
+                        valuation.value,
+                        valuation.currency,
+                        valuation.as_of,
+                        valuation.model_version,
+                        valuation.scenario,
+                    ),
+                )
+
+                if result.rowcount != 1:
+                    raise RepositoryWriteError(
+                        "IDM-W532: VALUATION_PROJECTION_WRITE_LOST"
                     )
 
     def add_calculation(
