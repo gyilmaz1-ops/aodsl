@@ -19,7 +19,7 @@ from .metrics import (
     metric_revision_key,
     validate_metric_evidence_link,
 )
-from .nodes import Calculation, Claim, Evidence, Metric
+from .nodes import Calculation, Claim, Estimate, Evidence, Metric
 from .temporal import active_revision_at, available_at
 from .types import NodeType
 from .validation import validate_edge, validate_node
@@ -466,6 +466,66 @@ class PostgreSQLEvidenceRepository:
             )
 
     @staticmethod
+    def _assert_estimate_projection_matches(
+        con,
+        estimate: Estimate,
+    ) -> None:
+        row = con.execute(
+            """
+            SELECT
+                node_type,
+                subject_id,
+                metric_name,
+                period_end,
+                value,
+                unit,
+                scenario,
+                model_version,
+                as_of,
+                currency
+            FROM estimate_facts
+            WHERE node_id = %s
+            """,
+            (estimate.id,),
+        ).fetchone()
+
+        if row is None:
+            raise RepositoryWriteError(
+                "IDM-W528: ESTIMATE_PROJECTION_WRITE_LOST"
+            )
+
+        expected = (
+            estimate.node_type.value,
+            estimate.subject_id,
+            estimate.metric_name,
+            estimate.period_end,
+            estimate.value,
+            estimate.unit,
+            estimate.scenario,
+            estimate.model_version,
+            estimate.as_of,
+            estimate.currency,
+        )
+
+        actual = (
+            str(row[0]),
+            str(row[1]),
+            str(row[2]),
+            row[3],
+            row[4],
+            str(row[5]),
+            str(row[6]),
+            str(row[7]),
+            row[8],
+            str(row[9]) if row[9] is not None else None,
+        )
+
+        if actual != expected:
+            raise RepositoryWriteError(
+                "IDM-W529: ESTIMATE_PROJECTION_MISMATCH"
+            )
+
+    @staticmethod
     def _assert_calculation_projection_matches(
         con,
         calculation: Calculation,
@@ -518,6 +578,112 @@ class PostgreSQLEvidenceRepository:
             raise RepositoryWriteError(
                 "IDM-W522: CALCULATION_PROJECTION_MISMATCH"
             )
+
+    def add_estimate(
+        self,
+        estimate: Estimate,
+    ) -> None:
+        validate_node(estimate)
+        payload, payload_hash = self._payload(estimate)
+
+        with self.connect() as con:
+            with con.transaction():
+                node_exists = (
+                    con.execute(
+                        """
+                        SELECT 1
+                        FROM domain_nodes
+                        WHERE id = %s
+                        """,
+                        (estimate.id,),
+                    ).fetchone()
+                    is not None
+                )
+
+                projection_exists = (
+                    con.execute(
+                        """
+                        SELECT 1
+                        FROM estimate_facts
+                        WHERE node_id = %s
+                        """,
+                        (estimate.id,),
+                    ).fetchone()
+                    is not None
+                )
+
+                if node_exists and not projection_exists:
+                    raise RepositoryWriteError(
+                        "IDM-W528: ESTIMATE_PROJECTION_WRITE_LOST"
+                    )
+
+                if projection_exists and not node_exists:
+                    raise RepositoryWriteError(
+                        "IDM-W530: ESTIMATE_ORPHAN_PROJECTION"
+                    )
+
+                if node_exists:
+                    self._assert_existing_node_matches(
+                        con,
+                        node_id=estimate.id,
+                        node_type=estimate.node_type.value,
+                        payload=payload,
+                        payload_hash=payload_hash,
+                    )
+                    self._assert_estimate_projection_matches(
+                        con,
+                        estimate,
+                    )
+                    return
+
+                self._insert_domain_node(
+                    con,
+                    node_id=estimate.id,
+                    node_type=estimate.node_type.value,
+                    payload=payload,
+                    payload_hash=payload_hash,
+                )
+
+                result = con.execute(
+                    """
+                    INSERT INTO estimate_facts (
+                        node_id,
+                        node_type,
+                        subject_id,
+                        metric_name,
+                        period_end,
+                        value,
+                        unit,
+                        scenario,
+                        model_version,
+                        as_of,
+                        currency
+                    )
+                    VALUES (
+                        %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s
+                    )
+                    ON CONFLICT (node_id) DO NOTHING
+                    """,
+                    (
+                        estimate.id,
+                        estimate.node_type.value,
+                        estimate.subject_id,
+                        estimate.metric_name,
+                        estimate.period_end,
+                        estimate.value,
+                        estimate.unit,
+                        estimate.scenario,
+                        estimate.model_version,
+                        estimate.as_of,
+                        estimate.currency,
+                    ),
+                )
+
+                if result.rowcount != 1:
+                    raise RepositoryWriteError(
+                        "IDM-W528: ESTIMATE_PROJECTION_WRITE_LOST"
+                    )
 
     def add_calculation(
         self,

@@ -34,6 +34,8 @@ def reset_database():
     with connect() as con:
         with con.transaction():
             con.execute("DROP TABLE IF EXISTS domain_edges CASCADE")
+            con.execute("DROP TABLE IF EXISTS estimate_facts CASCADE")
+            con.execute("DROP TABLE IF EXISTS calculation_facts CASCADE")
             con.execute("DROP TABLE IF EXISTS metric_facts CASCADE")
             con.execute("DROP TABLE IF EXISTS claim_facts CASCADE")
             con.execute("DROP TABLE IF EXISTS evidence_facts CASCADE")
@@ -115,7 +117,7 @@ def test_live_v4_to_v5_preserves_existing_claim_edges():
                 """
             )
 
-    assert manager.migrate() == 5
+    assert manager.migrate(target_version=5) == 5
 
     with connect() as con:
         rows = con.execute(
@@ -153,7 +155,7 @@ def test_live_v5_preserves_typed_foreign_keys_and_installs_semantic_check():
     reset_database()
 
     manager = PostgreSQLMigrationManager(DSN)
-    assert manager.migrate() == 5
+    assert manager.migrate(target_version=5) == 5
 
     constraints = _constraint_names()
 
@@ -172,8 +174,8 @@ def test_live_v5_history_is_recorded_exactly_once():
     manager = PostgreSQLMigrationManager(DSN)
 
     assert manager.migrate(target_version=4) == 4
-    assert manager.migrate() == 5
-    assert manager.migrate() == 5
+    assert manager.migrate(target_version=5) == 5
+    assert manager.migrate(target_version=5) == 5
 
     with connect() as con:
         rows = con.execute(
@@ -197,7 +199,7 @@ def test_live_v5_constraint_rejects_metric_contradicted_by():
     reset_database()
 
     manager = PostgreSQLMigrationManager(DSN)
-    assert manager.migrate() == 5
+    assert manager.migrate(target_version=5) == 5
 
     with connect() as con:
         with con.transaction():

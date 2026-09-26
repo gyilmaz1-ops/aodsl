@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from investment_domain.postgres_migrations import (
+    CALCULATION_INPUT_PROVENANCE,
     CURRENT_SCHEMA_VERSION,
     MIGRATIONS,
 )
@@ -13,8 +14,9 @@ def test_repository_protocol_exposes_add_calculation_inputs():
 
 
 # CIP002 / schema-v8 append-only contract
-def test_calculation_input_provenance_is_schema_v8():
-    assert CURRENT_SCHEMA_VERSION == 8
+def test_calculation_input_provenance_migration_is_schema_v8():
+    assert CALCULATION_INPUT_PROVENANCE.version == 8
+    assert CURRENT_SCHEMA_VERSION >= CALCULATION_INPUT_PROVENANCE.version
     assert len(MIGRATIONS) >= 8
     assert MIGRATIONS[7].version == 8
 

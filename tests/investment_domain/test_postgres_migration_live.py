@@ -8,12 +8,16 @@ import pytest
 
 from investment_domain.postgres_migrations import (
     ADD_METRIC_EVIDENCE_EDGES,
+    CALCULATION_FACTS,
+    CALCULATION_INPUT_PROVENANCE,
     CURRENT_SCHEMA_VERSION,
     EDGE_CREATED_AT,
     EDGE_ENDPOINT_TYPES,
+    ESTIMATE_FACTS,
     INITIAL_SCHEMA,
     MIGRATION_HISTORY_TABLE,
     METRIC_FACTS,
+    METRIC_REVISION_CONSTRAINTS,
     Migration,
     MigrationError,
     PostgreSQLMigrationManager,
@@ -39,6 +43,8 @@ def reset_database():
     with connect() as con:
         with con.transaction():
             con.execute("DROP TABLE IF EXISTS domain_edges CASCADE")
+            con.execute("DROP TABLE IF EXISTS estimate_facts CASCADE")
+            con.execute("DROP TABLE IF EXISTS calculation_facts CASCADE")
             con.execute("DROP TABLE IF EXISTS metric_facts CASCADE")
             con.execute("DROP TABLE IF EXISTS claim_facts CASCADE")
             con.execute("DROP TABLE IF EXISTS evidence_facts CASCADE")
@@ -74,6 +80,8 @@ def test_live_initial_migration_and_idempotent_restart():
             "claim_facts",
             "domain_edges",
             "metric_facts",
+            "calculation_facts",
+            "estimate_facts",
             MIGRATION_HISTORY_TABLE,
         } <= tables
 
@@ -110,6 +118,26 @@ def test_live_initial_migration_and_idempotent_restart():
                 5,
                 ADD_METRIC_EVIDENCE_EDGES.name,
                 ADD_METRIC_EVIDENCE_EDGES.checksum,
+            ),
+            (
+                6,
+                METRIC_REVISION_CONSTRAINTS.name,
+                METRIC_REVISION_CONSTRAINTS.checksum,
+            ),
+            (
+                7,
+                CALCULATION_FACTS.name,
+                CALCULATION_FACTS.checksum,
+            ),
+            (
+                8,
+                CALCULATION_INPUT_PROVENANCE.name,
+                CALCULATION_INPUT_PROVENANCE.checksum,
+            ),
+            (
+                9,
+                ESTIMATE_FACTS.name,
+                ESTIMATE_FACTS.checksum,
             ),
         ]
 

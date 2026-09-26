@@ -439,6 +439,35 @@ ALTER TABLE domain_edges
 )
 
 
+ESTIMATE_FACTS = Migration(
+    version=9,
+    name="add_estimate_facts",
+    statements=(
+        """
+CREATE TABLE estimate_facts (
+    node_id TEXT PRIMARY KEY,
+    node_type TEXT NOT NULL DEFAULT 'Estimate',
+    subject_id TEXT NOT NULL,
+    metric_name TEXT NOT NULL,
+    period_end TIMESTAMPTZ NOT NULL,
+    value NUMERIC NOT NULL,
+    unit TEXT NOT NULL,
+    scenario TEXT NOT NULL,
+    model_version TEXT NOT NULL,
+    as_of TIMESTAMPTZ NOT NULL,
+    currency TEXT NULL,
+    CONSTRAINT estimate_node_type
+        CHECK (node_type = 'Estimate'),
+    CONSTRAINT estimate_domain_node_fk
+        FOREIGN KEY (node_id, node_type)
+        REFERENCES domain_nodes(id, node_type)
+        ON DELETE RESTRICT
+)
+""".strip(),
+    ),
+)
+
+
 MIGRATIONS = (
     INITIAL_SCHEMA,
     EDGE_CREATED_AT,
@@ -448,6 +477,7 @@ MIGRATIONS = (
     METRIC_REVISION_CONSTRAINTS,
     CALCULATION_FACTS,
     CALCULATION_INPUT_PROVENANCE,
+    ESTIMATE_FACTS,
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 
