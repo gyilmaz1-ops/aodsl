@@ -3,8 +3,15 @@ import subprocess,sys,os,re,hashlib,json,zipfile,tempfile
 ROOT=Path(__file__).resolve().parents[1]
 ENV={**os.environ,"PYTHONPATH":str(ROOT/"src"),"PYTEST_DISABLE_PLUGIN_AUTOLOAD":"1"}
 
-def run(cmd, expect=0, timeout=180):
-    r=subprocess.run(cmd,cwd=ROOT,capture_output=True,text=True,timeout=timeout,env=ENV)
+def run(cmd, expect=0, timeout=180, env=None):
+    r=subprocess.run(
+        cmd,
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        env=ENV if env is None else env,
+    )
     print("$"," ".join(map(str,cmd)))
     print(r.stdout,end="")
     if r.returncode!=expect:
@@ -29,11 +36,9 @@ run([sys.executable,str(ROOT/"tests/run_contract_suite.py")],timeout=240)
 run([sys.executable,str(ROOT/"tests/contract/test_package_boundary.py")])
 
 # 4) Certification must fail closed without a live PostgreSQL DSN.
-env_saved=os.environ.pop("AODSL_POSTGRES_DSN",None)
-try:
-    run([sys.executable,"-m","aodsl","certify"],expect=2)
-finally:
-    if env_saved is not None: os.environ["AODSL_POSTGRES_DSN"]=env_saved
+cert_env = {**ENV}
+cert_env.pop("AODSL_POSTGRES_DSN", None)
+run([sys.executable,"-m","aodsl","certify"],expect=2,env=cert_env)
 
 # 5) Optional production attestation gate.
 production = "--production" in sys.argv[1:]

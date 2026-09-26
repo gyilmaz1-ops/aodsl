@@ -7,6 +7,7 @@ import time
 import pytest
 
 from investment_domain.postgres_migrations import (
+    ADD_FORECAST_COMPOSITION,
     ADD_METRIC_EVIDENCE_EDGES,
     CALCULATION_FACTS,
     CALCULATION_INPUT_PROVENANCE,
@@ -166,6 +167,11 @@ def test_live_initial_migration_and_idempotent_restart():
                 13,
                 FORECAST_FACTS.name,
                 FORECAST_FACTS.checksum,
+            ),
+            (
+                14,
+                ADD_FORECAST_COMPOSITION.name,
+                ADD_FORECAST_COMPOSITION.checksum,
             ),
         ]
 

@@ -43,11 +43,18 @@ def test_forecast_facts_enforces_typed_domain_node_fk():
 
 
 def test_v13_is_append_only_after_existing_history():
-    assert [migration.version for migration in MIGRATIONS] == list(
-        range(1, 14)
-    )
-    assert MIGRATIONS[-1].version == 13
-    assert MIGRATIONS[-1].name == "add_forecast_facts"
+    history_through_v13 = [
+        migration
+        for migration in MIGRATIONS
+        if migration.version <= 13
+    ]
+
+    assert [
+        migration.version
+        for migration in history_through_v13
+    ] == list(range(1, 14))
+    assert history_through_v13[-1].version == 13
+    assert history_through_v13[-1].name == "add_forecast_facts"
 
 
 def test_forecast_schema_does_not_duplicate_domain_vocabulary():

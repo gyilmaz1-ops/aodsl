@@ -51,6 +51,13 @@ class EvidenceRepository(Protocol):
     ) -> None:
         ...
 
+    def add_forecast_estimates(
+        self,
+        forecast_id: str,
+        estimate_ids: tuple[str, ...],
+    ) -> None:
+        ...
+
     def add_valuation(
         self,
         valuation: Valuation,

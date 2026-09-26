@@ -93,8 +93,13 @@ def repo():
     with repository.connect() as con:
         with con.transaction():
             con.execute("DELETE FROM domain_edges")
-            con.execute("DELETE FROM claim_facts")
+            con.execute("DELETE FROM valuation_facts")
+            con.execute("DELETE FROM forecast_facts")
+            con.execute("DELETE FROM estimate_facts")
+            con.execute("DELETE FROM calculation_facts")
+            con.execute("DELETE FROM metric_facts")
             con.execute("DELETE FROM evidence_facts")
+            con.execute("DELETE FROM claim_facts")
             con.execute("DELETE FROM domain_nodes")
 
     return repository

@@ -662,6 +662,99 @@ CREATE TABLE forecast_facts (
     ),
 )
 
+
+ADD_FORECAST_COMPOSITION = Migration(
+    version=14,
+    name="add_forecast_composition",
+    statements=(
+        """
+ALTER TABLE domain_edges
+    DROP CONSTRAINT domain_edges_type
+""".strip(),
+        """
+ALTER TABLE domain_edges
+    ADD CONSTRAINT domain_edges_type
+        CHECK (
+            edge_type IN (
+                'SUPPORTED_BY',
+                'CONTRADICTED_BY',
+                'DERIVED_FROM',
+                'DEPENDS_ON',
+                'CONTAINS'
+            )
+        )
+""".strip(),
+        """
+ALTER TABLE domain_edges
+    DROP CONSTRAINT domain_edges_target_type
+""".strip(),
+        """
+ALTER TABLE domain_edges
+    ADD CONSTRAINT domain_edges_target_type
+        CHECK (
+            target_type IN (
+                'Evidence',
+                'Metric',
+                'Calculation',
+                'Claim',
+                'Forecast',
+                'Estimate'
+            )
+        )
+""".strip(),
+        """
+ALTER TABLE domain_edges
+    DROP CONSTRAINT domain_edges_source_relation_target_type
+""".strip(),
+        """
+ALTER TABLE domain_edges
+    ADD CONSTRAINT domain_edges_source_relation_target_type
+        CHECK (
+            (
+                source_type = 'Claim'
+                AND edge_type IN ('SUPPORTED_BY', 'CONTRADICTED_BY')
+                AND target_type = 'Evidence'
+            )
+            OR
+            (
+                source_type = 'Metric'
+                AND edge_type = 'SUPPORTED_BY'
+                AND target_type = 'Evidence'
+            )
+            OR
+            (
+                source_type = 'Calculation'
+                AND edge_type = 'DERIVED_FROM'
+                AND target_type IN ('Metric', 'Calculation')
+            )
+            OR
+            (
+                source_type = 'Estimate'
+                AND edge_type = 'DERIVED_FROM'
+                AND target_type IN ('Metric', 'Calculation', 'Claim')
+            )
+            OR
+            (
+                source_type = 'Valuation'
+                AND edge_type = 'DEPENDS_ON'
+                AND target_type IN (
+                    'Forecast',
+                    'Estimate',
+                    'Metric',
+                    'Calculation'
+                )
+            )
+            OR
+            (
+                source_type = 'Forecast'
+                AND edge_type = 'CONTAINS'
+                AND target_type = 'Estimate'
+            )
+        )
+""".strip(),
+    ),
+)
+
 MIGRATIONS = (
     INITIAL_SCHEMA,
     EDGE_CREATED_AT,
@@ -676,6 +769,7 @@ MIGRATIONS = (
     VALUATION_FACTS,
     VALUATION_DEPENDENCIES,
     FORECAST_FACTS,
+    ADD_FORECAST_COMPOSITION,
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 

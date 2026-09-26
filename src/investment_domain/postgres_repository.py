@@ -885,6 +885,302 @@ class PostgreSQLEvidenceRepository:
                         "IDM-W536: FORECAST_PROJECTION_WRITE_LOST"
                     )
 
+    def add_forecast_estimates(
+        self,
+        forecast_id: str,
+        estimate_ids: tuple[str, ...],
+    ) -> None:
+        if not isinstance(forecast_id, str) or not forecast_id.strip():
+            raise ValueError("forecast_id must not be empty")
+        if not is_canonical_content_id(
+            forecast_id,
+            kind="forecast",
+        ):
+            raise ValueError(
+                "forecast_id must be a canonical Forecast ID"
+            )
+        if not isinstance(estimate_ids, tuple) or not estimate_ids:
+            raise ValueError(
+                "estimate_ids must be a non-empty tuple"
+            )
+        if any(
+            not isinstance(estimate_id, str)
+            or not estimate_id.strip()
+            for estimate_id in estimate_ids
+        ):
+            raise ValueError(
+                "estimate_ids must contain non-empty strings"
+            )
+        if len(estimate_ids) != len(set(estimate_ids)):
+            raise ValueError(
+                "estimate_ids must not contain duplicates"
+            )
+
+        with self.connect() as con:
+            with con.transaction():
+                source = con.execute(
+                    """
+                    SELECT node_type
+                    FROM domain_nodes
+                    WHERE id = %s
+                    FOR UPDATE
+                    """,
+                    (forecast_id,),
+                ).fetchone()
+
+                if source is None:
+                    raise RepositoryWriteError(
+                        "IDM-W507: EDGE_SOURCE_NOT_FOUND"
+                    )
+
+                if str(source[0]) != "Forecast":
+                    raise RepositoryWriteError(
+                        "IDM-W509: EDGE_SOURCE_TYPE_MISMATCH"
+                    )
+
+                forecast_projection = con.execute(
+                    """
+                    SELECT
+                        node_type,
+                        subject_id,
+                        scenario,
+                        as_of,
+                        model_version
+                    FROM forecast_facts
+                    WHERE node_id = %s
+                    """,
+                    (forecast_id,),
+                ).fetchone()
+
+                if forecast_projection is None:
+                    raise RepositoryWriteError(
+                        "IDM-W536: FORECAST_PROJECTION_WRITE_LOST"
+                    )
+
+                try:
+                    persisted_forecast = Forecast(
+                        id=forecast_id,
+                        subject_id=forecast_projection[1],
+                        scenario=forecast_projection[2],
+                        as_of=forecast_projection[3],
+                        model_version=forecast_projection[4],
+                    )
+                    validate_node(persisted_forecast)
+                except (TypeError, ValueError) as exc:
+                    raise RepositoryWriteError(
+                        "IDM-W537: FORECAST_PROJECTION_MISMATCH"
+                    ) from exc
+
+                payload, payload_hash = self._payload(
+                    persisted_forecast
+                )
+                self._assert_existing_node_matches(
+                    con,
+                    node_id=persisted_forecast.id,
+                    node_type=persisted_forecast.node_type.value,
+                    payload=payload,
+                    payload_hash=payload_hash,
+                )
+                self._assert_forecast_projection_matches(
+                    con,
+                    persisted_forecast,
+                )
+
+                targets = {}
+
+                for estimate_id in estimate_ids:
+                    target = con.execute(
+                        """
+                        SELECT node_type
+                        FROM domain_nodes
+                        WHERE id = %s
+                        """,
+                        (estimate_id,),
+                    ).fetchone()
+
+                    if target is None:
+                        raise RepositoryWriteError(
+                            "IDM-W508: EDGE_TARGET_NOT_FOUND"
+                        )
+
+                    target_type = str(target[0])
+                    if target_type != "Estimate":
+                        raise RepositoryWriteError(
+                            "IDM-W510: EDGE_TARGET_TYPE_MISMATCH"
+                        )
+
+                    estimate_projection = con.execute(
+                        """
+                        SELECT
+                            node_type,
+                            subject_id,
+                            metric_name,
+                            period_end,
+                            value,
+                            unit,
+                            scenario,
+                            model_version,
+                            as_of,
+                            currency
+                        FROM estimate_facts
+                        WHERE node_id = %s
+                        """,
+                        (estimate_id,),
+                    ).fetchone()
+
+                    if estimate_projection is None:
+                        raise RepositoryWriteError(
+                            "IDM-W528: ESTIMATE_PROJECTION_WRITE_LOST"
+                        )
+
+                    try:
+                        persisted_estimate = Estimate(
+                            id=estimate_id,
+                            subject_id=estimate_projection[1],
+                            metric_name=estimate_projection[2],
+                            period_end=estimate_projection[3],
+                            value=estimate_projection[4],
+                            unit=estimate_projection[5],
+                            scenario=estimate_projection[6],
+                            model_version=estimate_projection[7],
+                            as_of=estimate_projection[8],
+                            currency=estimate_projection[9],
+                        )
+                        validate_node(persisted_estimate)
+                    except (TypeError, ValueError) as exc:
+                        raise RepositoryWriteError(
+                            "IDM-W529: ESTIMATE_PROJECTION_MISMATCH"
+                        ) from exc
+
+                    estimate_payload, estimate_payload_hash = self._payload(
+                        persisted_estimate
+                    )
+                    self._assert_existing_node_matches(
+                        con,
+                        node_id=persisted_estimate.id,
+                        node_type=persisted_estimate.node_type.value,
+                        payload=estimate_payload,
+                        payload_hash=estimate_payload_hash,
+                    )
+                    self._assert_estimate_projection_matches(
+                        con,
+                        persisted_estimate,
+                    )
+
+                    if (
+                        persisted_estimate.subject_id
+                        != persisted_forecast.subject_id
+                        or persisted_estimate.scenario
+                        != persisted_forecast.scenario
+                        or persisted_estimate.model_version
+                        != persisted_forecast.model_version
+                        or persisted_estimate.as_of
+                        != persisted_forecast.as_of
+                    ):
+                        raise RepositoryWriteError(
+                            "IDM-W540: "
+                            "FORECAST_ESTIMATE_SEMANTIC_MISMATCH"
+                        )
+
+                    targets[estimate_id] = target_type
+
+                existing_rows = con.execute(
+                    """
+                    SELECT target_id, target_type
+                    FROM domain_edges
+                    WHERE source_id = %s
+                      AND source_type = 'Forecast'
+                      AND edge_type = 'CONTAINS'
+                    ORDER BY target_id
+                    """,
+                    (forecast_id,),
+                ).fetchall()
+
+                existing = {
+                    (str(row[0]), str(row[1]))
+                    for row in existing_rows
+                }
+                expected = {
+                    (estimate_id, targets[estimate_id])
+                    for estimate_id in estimate_ids
+                }
+
+                # Legal states:
+                #   empty -> complete aggregate write
+                #   exact complete set -> idempotent replay
+                # Any partial, extra, wrong-type or divergent set is
+                # persistent-state corruption and is never repaired.
+                if existing:
+                    if (
+                        existing != expected
+                        or len(existing_rows) != len(expected)
+                    ):
+                        raise RepositoryWriteError(
+                            "IDM-W539: "
+                            "FORECAST_COMPOSITION_SET_MISMATCH"
+                        )
+                    return
+
+                # All endpoints and Forecast/Estimate semantic dimensions
+                # have been validated before the first write.
+                for estimate_id in estimate_ids:
+                    result = con.execute(
+                        """
+                        INSERT INTO domain_edges (
+                            source_id,
+                            source_type,
+                            edge_type,
+                            target_id,
+                            target_type,
+                            created_at
+                        )
+                        VALUES (
+                            %s,
+                            'Forecast',
+                            'CONTAINS',
+                            %s,
+                            'Estimate',
+                            CURRENT_TIMESTAMP
+                        )
+                        ON CONFLICT DO NOTHING
+                        """,
+                        (
+                            forecast_id,
+                            estimate_id,
+                        ),
+                    )
+
+                    if result.rowcount != 1:
+                        raise RepositoryWriteError(
+                            "IDM-W539: "
+                            "FORECAST_COMPOSITION_SET_MISMATCH"
+                        )
+
+                persisted_rows = con.execute(
+                    """
+                    SELECT target_id, target_type
+                    FROM domain_edges
+                    WHERE source_id = %s
+                      AND source_type = 'Forecast'
+                      AND edge_type = 'CONTAINS'
+                    """,
+                    (forecast_id,),
+                ).fetchall()
+
+                persisted = {
+                    (str(row[0]), str(row[1]))
+                    for row in persisted_rows
+                }
+
+                if (
+                    persisted != expected
+                    or len(persisted_rows) != len(expected)
+                ):
+                    raise RepositoryWriteError(
+                        "IDM-W539: "
+                        "FORECAST_COMPOSITION_SET_MISMATCH"
+                    )
+
     def add_valuation(
         self,
         valuation: Valuation,
