@@ -37,6 +37,13 @@ class EvidenceRepository(Protocol):
     ) -> None:
         ...
 
+    def add_estimate_inputs(
+        self,
+        estimate_id: str,
+        input_ids: tuple[str, ...],
+    ) -> None:
+        ...
+
     def add_calculation(
         self,
         calculation: Calculation,

@@ -468,6 +468,63 @@ CREATE TABLE estimate_facts (
 )
 
 
+ESTIMATE_INPUT_PROVENANCE = Migration(
+    version=10,
+    name="add_estimate_input_provenance",
+    statements=(
+        """
+ALTER TABLE domain_edges
+    DROP CONSTRAINT domain_edges_target_type
+""".strip(),
+        """
+ALTER TABLE domain_edges
+    ADD CONSTRAINT domain_edges_target_type
+        CHECK (
+            target_type IN (
+                'Evidence',
+                'Metric',
+                'Calculation',
+                'Claim'
+            )
+        )
+""".strip(),
+        """
+ALTER TABLE domain_edges
+    DROP CONSTRAINT domain_edges_source_relation_target_type
+""".strip(),
+        """
+ALTER TABLE domain_edges
+    ADD CONSTRAINT domain_edges_source_relation_target_type
+        CHECK (
+            (
+                source_type = 'Claim'
+                AND edge_type IN ('SUPPORTED_BY', 'CONTRADICTED_BY')
+                AND target_type = 'Evidence'
+            )
+            OR
+            (
+                source_type = 'Metric'
+                AND edge_type = 'SUPPORTED_BY'
+                AND target_type = 'Evidence'
+            )
+            OR
+            (
+                source_type = 'Calculation'
+                AND edge_type = 'DERIVED_FROM'
+                AND target_type IN ('Metric', 'Calculation')
+            )
+            OR
+            (
+                source_type = 'Estimate'
+                AND edge_type = 'DERIVED_FROM'
+                AND target_type IN ('Metric', 'Calculation', 'Claim')
+            )
+        )
+""".strip(),
+    ),
+)
+
+
 MIGRATIONS = (
     INITIAL_SCHEMA,
     EDGE_CREATED_AT,
@@ -478,6 +535,7 @@ MIGRATIONS = (
     CALCULATION_FACTS,
     CALCULATION_INPUT_PROVENANCE,
     ESTIMATE_FACTS,
+    ESTIMATE_INPUT_PROVENANCE,
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 

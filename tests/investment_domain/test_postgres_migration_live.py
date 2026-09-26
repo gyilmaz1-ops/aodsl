@@ -14,6 +14,7 @@ from investment_domain.postgres_migrations import (
     EDGE_CREATED_AT,
     EDGE_ENDPOINT_TYPES,
     ESTIMATE_FACTS,
+    ESTIMATE_INPUT_PROVENANCE,
     INITIAL_SCHEMA,
     MIGRATION_HISTORY_TABLE,
     METRIC_FACTS,
@@ -138,6 +139,11 @@ def test_live_initial_migration_and_idempotent_restart():
                 9,
                 ESTIMATE_FACTS.name,
                 ESTIMATE_FACTS.checksum,
+            ),
+            (
+                10,
+                ESTIMATE_INPUT_PROVENANCE.name,
+                ESTIMATE_INPUT_PROVENANCE.checksum,
             ),
         ]
 

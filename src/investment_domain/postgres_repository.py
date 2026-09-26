@@ -1072,6 +1072,229 @@ class PostgreSQLEvidenceRepository:
                         "IDM-W524: CALCULATION_INPUT_SET_MISMATCH"
                     )
 
+    def add_estimate_inputs(
+        self,
+        estimate_id: str,
+        input_ids: tuple[str, ...],
+    ) -> None:
+        if not isinstance(estimate_id, str) or not estimate_id.strip():
+            raise ValueError("estimate_id must not be empty")
+        if not is_canonical_content_id(estimate_id, kind="estimate"):
+            raise ValueError(
+                "estimate_id must be a canonical Estimate ID"
+            )
+        if not isinstance(input_ids, tuple) or not input_ids:
+            raise ValueError("input_ids must be a non-empty tuple")
+        if any(
+            not isinstance(input_id, str) or not input_id.strip()
+            for input_id in input_ids
+        ):
+            raise ValueError("input_ids must contain non-empty strings")
+        if len(input_ids) != len(set(input_ids)):
+            raise ValueError("input_ids must not contain duplicates")
+
+        with self.connect() as con:
+            with con.transaction():
+                source = con.execute(
+                    """
+                    SELECT node_type
+                    FROM domain_nodes
+                    WHERE id = %s
+                    FOR UPDATE
+                    """,
+                    (estimate_id,),
+                ).fetchone()
+
+                if source is None:
+                    raise RepositoryWriteError(
+                        "IDM-W507: EDGE_SOURCE_NOT_FOUND"
+                    )
+
+                if str(source[0]) != "Estimate":
+                    raise RepositoryWriteError(
+                        "IDM-W509: EDGE_SOURCE_TYPE_MISMATCH"
+                    )
+
+                projection = con.execute(
+                    """
+                    SELECT
+                        node_type,
+                        subject_id,
+                        metric_name,
+                        period_end,
+                        value,
+                        unit,
+                        scenario,
+                        model_version,
+                        as_of,
+                        currency
+                    FROM estimate_facts
+                    WHERE node_id = %s
+                    """,
+                    (estimate_id,),
+                ).fetchone()
+
+                if projection is None:
+                    raise RepositoryWriteError(
+                        "IDM-W528: ESTIMATE_PROJECTION_WRITE_LOST"
+                    )
+
+                try:
+                    persisted_estimate = Estimate(
+                        id=estimate_id,
+                        subject_id=projection[1],
+                        metric_name=projection[2],
+                        period_end=projection[3],
+                        value=projection[4],
+                        unit=projection[5],
+                        scenario=projection[6],
+                        model_version=projection[7],
+                        as_of=projection[8],
+                        currency=projection[9],
+                    )
+                    validate_node(persisted_estimate)
+                except (TypeError, ValueError) as exc:
+                    raise RepositoryWriteError(
+                        "IDM-W529: ESTIMATE_PROJECTION_MISMATCH"
+                    ) from exc
+
+                payload, payload_hash = self._payload(
+                    persisted_estimate
+                )
+                self._assert_existing_node_matches(
+                    con,
+                    node_id=persisted_estimate.id,
+                    node_type=persisted_estimate.node_type.value,
+                    payload=payload,
+                    payload_hash=payload_hash,
+                )
+                self._assert_estimate_projection_matches(
+                    con,
+                    persisted_estimate,
+                )
+
+                targets = {}
+                for target_id in input_ids:
+                    target = con.execute(
+                        """
+                        SELECT node_type
+                        FROM domain_nodes
+                        WHERE id = %s
+                        """,
+                        (target_id,),
+                    ).fetchone()
+
+                    if target is None:
+                        raise RepositoryWriteError(
+                            "IDM-W508: EDGE_TARGET_NOT_FOUND"
+                        )
+
+                    target_type = str(target[0])
+                    if target_type not in (
+                        "Metric",
+                        "Calculation",
+                        "Claim",
+                    ):
+                        raise RepositoryWriteError(
+                            "IDM-W510: EDGE_TARGET_TYPE_MISMATCH"
+                        )
+
+                    targets[target_id] = target_type
+
+                existing_rows = con.execute(
+                    """
+                    SELECT target_id, target_type
+                    FROM domain_edges
+                    WHERE source_id = %s
+                      AND source_type = 'Estimate'
+                      AND edge_type = 'DERIVED_FROM'
+                    ORDER BY target_id
+                    """,
+                    (estimate_id,),
+                ).fetchall()
+
+                existing = {
+                    (str(row[0]), str(row[1]))
+                    for row in existing_rows
+                }
+                expected = {
+                    (target_id, targets[target_id])
+                    for target_id in input_ids
+                }
+
+                # Legal states:
+                #   empty -> complete aggregate write
+                #   exact complete set -> idempotent replay
+                # Any partial, extra, wrong-type or divergent set is
+                # persistent-state corruption and is never repaired.
+                if existing:
+                    if (
+                        existing != expected
+                        or len(existing_rows) != len(expected)
+                    ):
+                        raise RepositoryWriteError(
+                            "IDM-W531: ESTIMATE_INPUT_SET_MISMATCH"
+                        )
+                    return
+
+                # All endpoints have been validated before the first write.
+                for target_id in input_ids:
+                    result = con.execute(
+                        """
+                        INSERT INTO domain_edges (
+                            source_id,
+                            source_type,
+                            edge_type,
+                            target_id,
+                            target_type,
+                            created_at
+                        )
+                        VALUES (
+                            %s,
+                            'Estimate',
+                            'DERIVED_FROM',
+                            %s,
+                            %s,
+                            CURRENT_TIMESTAMP
+                        )
+                        ON CONFLICT DO NOTHING
+                        """,
+                        (
+                            estimate_id,
+                            target_id,
+                            targets[target_id],
+                        ),
+                    )
+
+                    if result.rowcount != 1:
+                        raise RepositoryWriteError(
+                            "IDM-W531: ESTIMATE_INPUT_SET_MISMATCH"
+                        )
+
+                persisted_rows = con.execute(
+                    """
+                    SELECT target_id, target_type
+                    FROM domain_edges
+                    WHERE source_id = %s
+                      AND source_type = 'Estimate'
+                      AND edge_type = 'DERIVED_FROM'
+                    """,
+                    (estimate_id,),
+                ).fetchall()
+
+                persisted = {
+                    (str(row[0]), str(row[1]))
+                    for row in persisted_rows
+                }
+
+                if (
+                    persisted != expected
+                    or len(persisted_rows) != len(expected)
+                ):
+                    raise RepositoryWriteError(
+                        "IDM-W531: ESTIMATE_INPUT_SET_MISMATCH"
+                    )
+
     def add_metric(self, metric: Metric) -> None:
         validate_node(metric)
         payload, payload_hash = self._payload(metric)
