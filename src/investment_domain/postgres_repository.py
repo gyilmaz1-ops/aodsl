@@ -5,7 +5,7 @@ import json
 from decimal import Decimal
 
 from .canonical import canonical_json, canonical_sha256
-from .calculations import validate_calculation
+from .calculations import validate_calculation, evaluate_calculation
 from .claims import (
     ClaimEvidenceLink,
     eligible_claim_evidence,
@@ -1721,6 +1721,149 @@ class PostgreSQLEvidenceRepository:
 
         finally:
             visiting.remove(calculation_id)
+
+
+    def _verify_calculation_reproducibility(
+        self,
+        con,
+        calculation_id: str,
+        visiting: set[str],
+        memo: dict[
+            str,
+            tuple[
+                Calculation,
+                tuple[Decimal, str, str | None],
+            ],
+        ],
+    ) -> tuple[
+        Calculation,
+        tuple[Decimal, str, str | None],
+    ]:
+        if calculation_id in memo:
+            return memo[calculation_id]
+
+        if calculation_id in visiting:
+            raise RepositoryReadError(
+                "Calculation dependency cycle"
+            )
+
+        visiting.add(calculation_id)
+
+        try:
+            calculation = self._load_exact_calculation(
+                con,
+                calculation_id,
+            )
+
+            edge_rows = con.execute(
+                """
+                SELECT
+                    target_id,
+                    target_type
+                FROM domain_edges
+                WHERE source_id = %s
+                  AND source_type = 'Calculation'
+                  AND edge_type = 'DERIVED_FROM'
+                ORDER BY target_id
+                """,
+                (calculation_id,),
+            ).fetchall()
+
+            expected = set(calculation.input_ids)
+            actual = {str(row[0]) for row in edge_rows}
+
+            if (
+                actual != expected
+                or len(edge_rows) != len(expected)
+            ):
+                raise RepositoryReadError(
+                    "Calculation input provenance set mismatch"
+                )
+
+            edges_by_target = {
+                str(row[0]): row
+                for row in edge_rows
+            }
+
+            inputs = []
+
+            for input_id in calculation.input_ids:
+                edge = edges_by_target[input_id]
+                target_type = str(edge[1])
+
+                if target_type == NodeType.METRIC.value:
+                    metric = self._load_exact_metric(
+                        con,
+                        input_id,
+                    )
+                    inputs.append(
+                        (
+                            metric.value,
+                            metric.unit,
+                            metric.currency,
+                        )
+                    )
+
+                elif target_type == NodeType.CALCULATION.value:
+                    _, child_result = (
+                        self._verify_calculation_reproducibility(
+                            con,
+                            input_id,
+                            visiting,
+                            memo,
+                        )
+                    )
+                    inputs.append(child_result)
+
+                else:
+                    raise RepositoryReadError(
+                        "Invalid Calculation dependency type"
+                    )
+
+            try:
+                result = evaluate_calculation(
+                    calculation,
+                    inputs=tuple(inputs),
+                    verify_materialized=True,
+                )
+            except (TypeError, ValueError) as exc:
+                raise RepositoryReadError(
+                    "Calculation materialization is not reproducible"
+                ) from exc
+
+            verified = (
+                calculation,
+                result,
+            )
+            memo[calculation_id] = verified
+            return verified
+
+        finally:
+            visiting.remove(calculation_id)
+
+
+    def verify_calculation(
+        self,
+        calculation_id: str,
+    ) -> Calculation:
+        if not is_canonical_content_id(
+            calculation_id,
+            kind="calculation",
+        ):
+            raise ValueError(
+                "calculation_id must be a canonical Calculation ID"
+            )
+
+        with self.connect() as con:
+            calculation, _ = (
+                self._verify_calculation_reproducibility(
+                    con,
+                    calculation_id,
+                    set(),
+                    {},
+                )
+            )
+            return calculation
 
     def calculation_at(
         self,

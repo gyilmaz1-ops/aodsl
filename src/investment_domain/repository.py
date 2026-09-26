@@ -49,6 +49,12 @@ class EvidenceRepository(Protocol):
     ) -> Calculation | None:
         ...
 
+    def verify_calculation(
+        self,
+        calculation_id: str,
+    ) -> Calculation:
+        ...
+
     def add_claim_evidence_link(
         self,
         link: ClaimEvidenceLink,
