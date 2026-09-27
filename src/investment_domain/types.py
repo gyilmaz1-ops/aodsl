@@ -13,6 +13,7 @@ class NodeType(str, Enum):
     ESTIMATE = "Estimate"
     FORECAST = "Forecast"
     CATALYST = "Catalyst"
+    CATALYST_IMPACT = "CatalystImpact"
     RISK = "Risk"
     VALUATION = "Valuation"
     RECOMMENDATION = "Recommendation"

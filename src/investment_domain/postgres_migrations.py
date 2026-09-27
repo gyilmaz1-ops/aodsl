@@ -862,6 +862,90 @@ ALTER TABLE domain_edges
 )
 
 
+CATALYST_IMPACT_FACTS = Migration(
+    version=17,
+    name="add_catalyst_impact_facts",
+    statements=(
+        """
+ALTER TABLE domain_nodes
+    DROP CONSTRAINT domain_nodes_node_type
+""".strip(),
+        """
+ALTER TABLE domain_nodes
+    ADD CONSTRAINT domain_nodes_node_type
+        CHECK (
+            node_type IN (
+                'Company',
+                'Security',
+                'Metric',
+                'Claim',
+                'Evidence',
+                'Calculation',
+                'Estimate',
+                'Forecast',
+                'Catalyst',
+                'CatalystImpact',
+                'Risk',
+                'Valuation',
+                'Recommendation'
+            )
+        )
+""".strip(),
+        """
+CREATE TABLE catalyst_impact_facts (
+    node_id TEXT PRIMARY KEY,
+    node_type TEXT NOT NULL DEFAULT 'CatalystImpact',
+    catalyst_id TEXT NOT NULL,
+    target_id TEXT NOT NULL,
+    direction TEXT NOT NULL,
+    magnitude TEXT NOT NULL,
+    probability NUMERIC NOT NULL,
+    confidence NUMERIC NOT NULL,
+    horizon TEXT NOT NULL,
+    rationale TEXT NOT NULL,
+    as_of TIMESTAMPTZ NOT NULL,
+    created_by TEXT NOT NULL,
+
+    CONSTRAINT catalyst_impact_node_type
+        CHECK (node_type = 'CatalystImpact'),
+
+    CONSTRAINT catalyst_impact_domain_node_fk
+        FOREIGN KEY (node_id, node_type)
+        REFERENCES domain_nodes(id, node_type)
+        ON DELETE RESTRICT,
+
+    CONSTRAINT catalyst_impact_direction
+        CHECK (
+            direction IN ('POSITIVE', 'NEGATIVE', 'NEUTRAL')
+        ),
+
+    CONSTRAINT catalyst_impact_magnitude
+        CHECK (
+            magnitude IN ('LOW', 'MEDIUM', 'HIGH')
+        ),
+
+    CONSTRAINT catalyst_impact_horizon
+        CHECK (
+            horizon IN ('NEAR_TERM', 'MEDIUM_TERM', 'LONG_TERM')
+        ),
+
+    CONSTRAINT catalyst_impact_probability_range
+        CHECK (
+            probability >= 0
+            AND probability <= 1
+        ),
+
+    CONSTRAINT catalyst_impact_confidence_range
+        CHECK (
+            confidence >= 0
+            AND confidence <= 1
+        )
+)
+""".strip(),
+    ),
+)
+
+
 MIGRATIONS = (
     INITIAL_SCHEMA,
     EDGE_CREATED_AT,
@@ -879,6 +963,7 @@ MIGRATIONS = (
     ADD_FORECAST_COMPOSITION,
     CATALYST_FACTS,
     CATALYST_AFFECTS_EDGES,
+    CATALYST_IMPACT_FACTS,
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 

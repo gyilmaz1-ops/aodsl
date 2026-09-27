@@ -5,6 +5,7 @@ from .identity import canonical_id
 from .nodes import (
     Calculation,
     Catalyst,
+    CatalystImpact,
     Claim,
     Company,
     Estimate,
@@ -48,6 +49,7 @@ __all__ = [
     "Estimate",
     "Forecast",
     "Catalyst",
+    "CatalystImpact",
     "Risk",
     "Valuation",
     "Recommendation",

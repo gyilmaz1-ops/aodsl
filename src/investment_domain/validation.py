@@ -38,6 +38,7 @@ ID_PREFIX = {
     NodeType.ESTIMATE: "estimate:",
     NodeType.FORECAST: "forecast:",
     NodeType.CATALYST: "catalyst:",
+    NodeType.CATALYST_IMPACT: "catalyst_impact:",
     NodeType.RISK: "risk:",
     NodeType.VALUATION: "valuation:",
     NodeType.RECOMMENDATION: "recommendation:",
@@ -338,7 +339,64 @@ def _expected_identity(node):
         for f in fields(node)
         if f.name not in {"id", "node_type", "metadata"}
     }
-    return canonical_id(node.node_type.value.lower(), payload)
+    if node.node_type == NodeType.CATALYST_IMPACT:
+        if node.direction not in {
+            "POSITIVE",
+            "NEGATIVE",
+            "NEUTRAL",
+        }:
+            raise DomainValidationError(
+                "IDM-C017",
+                "unsupported catalyst impact direction",
+            )
+
+        if node.magnitude not in {
+            "LOW",
+            "MEDIUM",
+            "HIGH",
+        }:
+            raise DomainValidationError(
+                "IDM-C018",
+                "unsupported catalyst impact magnitude",
+            )
+
+        if node.horizon not in {
+            "NEAR_TERM",
+            "MEDIUM_TERM",
+            "LONG_TERM",
+        }:
+            raise DomainValidationError(
+                "IDM-C019",
+                "unsupported catalyst impact horizon",
+            )
+
+        for field_name in ("probability", "confidence"):
+            value = getattr(node, field_name)
+
+            if not isinstance(value, Decimal):
+                raise DomainValidationError(
+                    "IDM-C020",
+                    f"{field_name} must be Decimal",
+                )
+
+            if not value.is_finite():
+                raise DomainValidationError(
+                    "IDM-C021",
+                    f"{field_name} must be finite",
+                )
+
+            if value < Decimal("0") or value > Decimal("1"):
+                raise DomainValidationError(
+                    "IDM-C021",
+                    f"{field_name} must be within [0, 1]",
+                )
+
+    kind = (
+        "catalyst_impact"
+        if node.node_type == NodeType.CATALYST_IMPACT
+        else node.node_type.value.lower()
+    )
+    return canonical_id(kind, payload)
 
 
 def validate_node(node) -> None:

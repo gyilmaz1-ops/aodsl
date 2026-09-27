@@ -10,6 +10,7 @@ from investment_domain.postgres_migrations import (
     ADD_FORECAST_COMPOSITION,
     CATALYST_FACTS,
     CATALYST_AFFECTS_EDGES,
+    CATALYST_IMPACT_FACTS,
     ADD_METRIC_EVIDENCE_EDGES,
     CALCULATION_FACTS,
     CALCULATION_INPUT_PROVENANCE,
@@ -50,6 +51,7 @@ def reset_database():
     with connect() as con:
         with con.transaction():
             con.execute("DROP TABLE IF EXISTS domain_edges CASCADE")
+            con.execute("DROP TABLE IF EXISTS catalyst_impact_facts CASCADE")
             con.execute("DROP TABLE IF EXISTS catalyst_facts CASCADE")
             con.execute("DROP TABLE IF EXISTS forecast_facts CASCADE")
             con.execute("DROP TABLE IF EXISTS valuation_facts CASCADE")
@@ -95,6 +97,7 @@ def test_live_initial_migration_and_idempotent_restart():
             "valuation_facts",
             "forecast_facts",
             "catalyst_facts",
+            "catalyst_impact_facts",
             MIGRATION_HISTORY_TABLE,
         } <= tables
 
@@ -186,6 +189,11 @@ def test_live_initial_migration_and_idempotent_restart():
                 16,
                 CATALYST_AFFECTS_EDGES.name,
                 CATALYST_AFFECTS_EDGES.checksum,
+            ),
+            (
+                17,
+                CATALYST_IMPACT_FACTS.name,
+                CATALYST_IMPACT_FACTS.checksum,
             ),
         ]
 

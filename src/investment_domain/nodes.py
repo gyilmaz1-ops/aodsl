@@ -122,6 +122,25 @@ class Catalyst:
     node_type: NodeType = field(default=NodeType.CATALYST, init=False)
 
 
+
+@dataclass(frozen=True)
+class CatalystImpact:
+    id: str
+    catalyst_id: str
+    target_id: str
+    direction: str
+    magnitude: str
+    probability: Decimal
+    confidence: Decimal
+    horizon: str
+    rationale: str
+    as_of: datetime
+    created_by: str
+    node_type: NodeType = field(
+        default=NodeType.CATALYST_IMPACT,
+        init=False,
+    )
+
 @dataclass(frozen=True)
 class Risk:
     id: str

@@ -27,7 +27,8 @@ def test_v16_is_catalyst_affects_edges_migration():
 def test_v16_is_appended_after_v15():
     versions = [migration.version for migration in MIGRATIONS]
 
-    assert versions[-2:] == [15, 16]
+    v15_index = versions.index(15)
+    assert versions[v15_index : v15_index + 2] == [15, 16]
 
 
 def test_domain_semantics_allow_only_supported_catalyst_affects_targets():

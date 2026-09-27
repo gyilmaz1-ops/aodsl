@@ -103,6 +103,7 @@ def repo():
     with repository.connect() as con:
         with con.transaction():
             con.execute("DELETE FROM domain_edges")
+            con.execute("DELETE FROM catalyst_impact_facts")
             con.execute("DELETE FROM valuation_facts")
             con.execute("DELETE FROM forecast_facts")
             con.execute("DELETE FROM estimate_facts")
