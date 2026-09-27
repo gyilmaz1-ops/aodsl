@@ -1828,6 +1828,349 @@ class PostgreSQLEvidenceRepository:
                         "IDM-W532: VALUATION_PROJECTION_WRITE_LOST"
                     )
 
+    def valuation_inputs_at(
+        self,
+        valuation_id: str,
+        research_cutoff,
+    ) -> tuple:
+        if not isinstance(valuation_id, str) or not valuation_id.strip():
+            raise ValueError("valuation_id must not be empty")
+
+        if not is_canonical_content_id(
+            valuation_id,
+            kind="valuation",
+        ):
+            raise ValueError(
+                "valuation_id must be a canonical Valuation ID"
+            )
+
+        if (
+            research_cutoff.tzinfo is None
+            or research_cutoff.utcoffset() is None
+        ):
+            raise ValueError(
+                "research_cutoff must be timezone-aware"
+            )
+
+        with self.connect() as con:
+            valuation_row = con.execute(
+                """
+                SELECT
+                    n.node_type,
+                    n.canonical_payload,
+                    n.payload_hash,
+                    v.node_type,
+                    v.security_id,
+                    v.method,
+                    v.value,
+                    v.currency,
+                    v.as_of,
+                    v.model_version,
+                    v.scenario
+                FROM domain_nodes AS n
+                LEFT JOIN valuation_facts AS v
+                  ON v.node_id = n.id
+                WHERE n.id = %s
+                """,
+                (valuation_id,),
+            ).fetchone()
+
+            if valuation_row is None:
+                raise RepositoryReadError(
+                    "IDM-R545: VALUATION_NOT_FOUND"
+                )
+
+            if str(valuation_row[0]) != NodeType.VALUATION.value:
+                raise RepositoryReadError(
+                    "IDM-R546: VALUATION_TYPE_MISMATCH"
+                )
+
+            if valuation_row[3] is None:
+                raise RepositoryReadError(
+                    "IDM-R547: VALUATION_PROJECTION_NOT_FOUND"
+                )
+
+            try:
+                valuation = Valuation(
+                    id=valuation_id,
+                    security_id=valuation_row[4],
+                    method=valuation_row[5],
+                    value=valuation_row[6],
+                    currency=valuation_row[7],
+                    as_of=valuation_row[8],
+                    model_version=valuation_row[9],
+                    scenario=valuation_row[10],
+                )
+                validate_node(valuation)
+            except (TypeError, ValueError) as exc:
+                raise RepositoryReadError(
+                    "IDM-R548: INVALID_STORED_VALUATION"
+                ) from exc
+
+            payload, payload_hash = self._payload(valuation)
+
+            if (
+                valuation_row[1] != json.loads(payload)
+                or str(valuation_row[2]) != payload_hash
+            ):
+                raise RepositoryReadError(
+                    "IDM-R549: VALUATION_INTEGRITY_FAILURE"
+                )
+
+            if str(valuation_row[3]) != NodeType.VALUATION.value:
+                raise RepositoryReadError(
+                    "IDM-R548: INVALID_STORED_VALUATION"
+                )
+
+            if valuation.as_of > research_cutoff:
+                raise RepositoryReadError(
+                    "IDM-R551: VALUATION_NOT_VISIBLE_AT_CUTOFF"
+                )
+
+            dependency_rows = con.execute(
+                """
+                SELECT
+                    target_id,
+                    target_type,
+                    created_at
+                FROM domain_edges
+                WHERE source_id = %s
+                  AND source_type = 'Valuation'
+                  AND edge_type = 'DEPENDS_ON'
+                ORDER BY target_id
+                """,
+                (valuation_id,),
+            ).fetchall()
+
+            resolved = []
+
+            for target_id, target_type, edge_created_at in dependency_rows:
+                target_id = str(target_id)
+                target_type = str(target_type)
+
+                if edge_created_at > research_cutoff:
+                    raise RepositoryReadError(
+                        "IDM-R552: "
+                        "VALUATION_DEPENDENCY_EDGE_NOT_VISIBLE_AT_CUTOFF"
+                    )
+
+                if target_type == NodeType.ESTIMATE.value:
+                    row = con.execute(
+                        """
+                        SELECT
+                            n.node_type,
+                            n.canonical_payload,
+                            n.payload_hash,
+                            e.node_type,
+                            e.subject_id,
+                            e.metric_name,
+                            e.period_end,
+                            e.value,
+                            e.unit,
+                            e.scenario,
+                            e.model_version,
+                            e.as_of,
+                            e.currency
+                        FROM domain_nodes AS n
+                        LEFT JOIN estimate_facts AS e
+                          ON e.node_id = n.id
+                        WHERE n.id = %s
+                        """,
+                        (target_id,),
+                    ).fetchone()
+
+                    if (
+                        row is None
+                        or str(row[0]) != NodeType.ESTIMATE.value
+                        or row[3] is None
+                    ):
+                        raise RepositoryReadError(
+                            "IDM-R550: "
+                            "VALUATION_INPUT_NOT_VISIBLE_AT_CUTOFF"
+                        )
+
+                    try:
+                        dependency = Estimate(
+                            id=target_id,
+                            subject_id=row[4],
+                            metric_name=row[5],
+                            period_end=row[6],
+                            value=row[7],
+                            unit=row[8],
+                            scenario=row[9],
+                            model_version=row[10],
+                            as_of=row[11],
+                            currency=row[12],
+                        )
+                        validate_node(dependency)
+                    except (TypeError, ValueError) as exc:
+                        raise RepositoryReadError(
+                            "IDM-R550: "
+                            "VALUATION_INPUT_NOT_VISIBLE_AT_CUTOFF"
+                        ) from exc
+
+                    dependency_payload, dependency_hash = (
+                        self._payload(dependency)
+                    )
+
+                    if (
+                        row[1] != json.loads(dependency_payload)
+                        or str(row[2]) != dependency_hash
+                        or str(row[3]) != NodeType.ESTIMATE.value
+                    ):
+                        raise RepositoryReadError(
+                            "IDM-R550: "
+                            "VALUATION_INPUT_NOT_VISIBLE_AT_CUTOFF"
+                        )
+
+                    if dependency.as_of > research_cutoff:
+                        raise RepositoryReadError(
+                            "IDM-R550: "
+                            "VALUATION_INPUT_NOT_VISIBLE_AT_CUTOFF"
+                        )
+
+                    resolved.append(dependency)
+                    continue
+
+                if target_type == NodeType.CATALYST_IMPACT.value:
+                    dependency = self.catalyst_impact_at(
+                        target_id,
+                        research_cutoff,
+                    )
+
+                    if dependency is None:
+                        raise RepositoryReadError(
+                            "IDM-R550: "
+                            "VALUATION_INPUT_NOT_VISIBLE_AT_CUTOFF"
+                        )
+
+                    resolved.append(dependency)
+                    continue
+
+                if target_type == NodeType.FORECAST.value:
+                    row = con.execute(
+                        """
+                        SELECT
+                            n.node_type,
+                            n.canonical_payload,
+                            n.payload_hash,
+                            f.node_type,
+                            f.subject_id,
+                            f.scenario,
+                            f.as_of,
+                            f.model_version
+                        FROM domain_nodes AS n
+                        LEFT JOIN forecast_facts AS f
+                          ON f.node_id = n.id
+                        WHERE n.id = %s
+                        """,
+                        (target_id,),
+                    ).fetchone()
+
+                    if (
+                        row is None
+                        or str(row[0]) != NodeType.FORECAST.value
+                        or row[3] is None
+                    ):
+                        raise RepositoryReadError(
+                            "IDM-R550: "
+                            "VALUATION_INPUT_NOT_VISIBLE_AT_CUTOFF"
+                        )
+
+                    try:
+                        dependency = Forecast(
+                            id=target_id,
+                            subject_id=row[4],
+                            scenario=row[5],
+                            as_of=row[6],
+                            model_version=row[7],
+                        )
+                        validate_node(dependency)
+                    except (TypeError, ValueError) as exc:
+                        raise RepositoryReadError(
+                            "IDM-R550: "
+                            "VALUATION_INPUT_NOT_VISIBLE_AT_CUTOFF"
+                        ) from exc
+
+                    dependency_payload, dependency_hash = self._payload(
+                        dependency
+                    )
+                    if (
+                        row[1] != json.loads(dependency_payload)
+                        or str(row[2]) != dependency_hash
+                        or str(row[3]) != NodeType.FORECAST.value
+                    ):
+                        raise RepositoryReadError(
+                            "IDM-R550: "
+                            "VALUATION_INPUT_NOT_VISIBLE_AT_CUTOFF"
+                        )
+
+                    if dependency.as_of > research_cutoff:
+                        raise RepositoryReadError(
+                            "IDM-R550: "
+                            "VALUATION_INPUT_NOT_VISIBLE_AT_CUTOFF"
+                        )
+
+                    resolved.append(dependency)
+                    continue
+
+                if target_type == NodeType.METRIC.value:
+                    try:
+                        dependency = self._load_exact_metric(
+                            con,
+                            target_id,
+                        )
+                    except RepositoryReadError as exc:
+                        raise RepositoryReadError(
+                            "IDM-R550: "
+                            "VALUATION_INPUT_NOT_VISIBLE_AT_CUTOFF"
+                        ) from exc
+
+                    if not available_at(
+                        dependency,
+                        research_cutoff,
+                    ):
+                        raise RepositoryReadError(
+                            "IDM-R550: "
+                            "VALUATION_INPUT_NOT_VISIBLE_AT_CUTOFF"
+                        )
+
+                    resolved.append(dependency)
+                    continue
+
+                if target_type == NodeType.CALCULATION.value:
+                    try:
+                        dependency, visible = (
+                            self._calculation_visible_at(
+                                con,
+                                target_id,
+                                research_cutoff,
+                                set(),
+                            )
+                        )
+                    except RepositoryReadError as exc:
+                        raise RepositoryReadError(
+                            "IDM-R550: "
+                            "VALUATION_INPUT_NOT_VISIBLE_AT_CUTOFF"
+                        ) from exc
+
+                    if not visible:
+                        raise RepositoryReadError(
+                            "IDM-R550: "
+                            "VALUATION_INPUT_NOT_VISIBLE_AT_CUTOFF"
+                        )
+
+                    resolved.append(dependency)
+                    continue
+
+                raise RepositoryReadError(
+                    "IDM-R550: "
+                    "VALUATION_INPUT_NOT_VISIBLE_AT_CUTOFF"
+                )
+
+            return tuple(resolved)
+
+
     def add_calculation(
         self,
         calculation: Calculation,
@@ -2096,6 +2439,7 @@ class PostgreSQLEvidenceRepository:
                         "Estimate",
                         "Metric",
                         "Calculation",
+                        "CatalystImpact",
                     ):
                         raise RepositoryWriteError(
                             "IDM-W510: EDGE_TARGET_TYPE_MISMATCH"

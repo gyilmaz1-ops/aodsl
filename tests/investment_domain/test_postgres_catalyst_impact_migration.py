@@ -16,8 +16,8 @@ def _sql(migration):
     return "\n".join(migration.statements)
 
 
-def test_v17_is_current_schema_version():
-    assert CURRENT_SCHEMA_VERSION == 17
+def test_v17_precedes_current_schema_version():
+    assert CURRENT_SCHEMA_VERSION > 17
 
 
 def test_v17_migration_is_registered_once():

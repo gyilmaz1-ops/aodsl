@@ -107,6 +107,16 @@ class EvidenceRepository(Protocol):
     ) -> None:
         ...
 
+    def valuation_inputs_at(
+        self,
+        valuation_id: str,
+        research_cutoff: datetime,
+    ) -> tuple[
+        Forecast | Estimate | Metric | Calculation | CatalystImpact,
+        ...,
+    ]:
+        ...
+
     def add_estimate_inputs(
         self,
         estimate_id: str,

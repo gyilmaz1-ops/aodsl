@@ -13,6 +13,7 @@ def test_domain_allows_exact_valuation_dependency_vocabulary():
         (NodeType.VALUATION, EdgeType.DEPENDS_ON, NodeType.ESTIMATE),
         (NodeType.VALUATION, EdgeType.DEPENDS_ON, NodeType.METRIC),
         (NodeType.VALUATION, EdgeType.DEPENDS_ON, NodeType.CALCULATION),
+        (NodeType.VALUATION, EdgeType.DEPENDS_ON, NodeType.CATALYST_IMPACT),
     }
 
     actual = {

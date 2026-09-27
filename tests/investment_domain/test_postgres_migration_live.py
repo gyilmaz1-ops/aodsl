@@ -19,6 +19,7 @@ from investment_domain.postgres_migrations import (
     EDGE_ENDPOINT_TYPES,
     ESTIMATE_FACTS,
     ESTIMATE_INPUT_PROVENANCE,
+    EXTEND_VALUATION_DEPENDENCIES_WITH_CATALYST_IMPACT,
     FORECAST_FACTS,
     INITIAL_SCHEMA,
     VALUATION_FACTS,
@@ -194,6 +195,11 @@ def test_live_initial_migration_and_idempotent_restart():
                 17,
                 CATALYST_IMPACT_FACTS.name,
                 CATALYST_IMPACT_FACTS.checksum,
+            ),
+            (
+                18,
+                EXTEND_VALUATION_DEPENDENCIES_WITH_CATALYST_IMPACT.name,
+                EXTEND_VALUATION_DEPENDENCIES_WITH_CATALYST_IMPACT.checksum,
             ),
         ]
 

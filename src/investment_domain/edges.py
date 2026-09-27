@@ -43,6 +43,7 @@ ALLOWED_EDGES: frozenset[tuple[NodeType, EdgeType, NodeType]] = frozenset({
     (NodeType.VALUATION, EdgeType.DEPENDS_ON, NodeType.ESTIMATE),
     (NodeType.VALUATION, EdgeType.DEPENDS_ON, NodeType.METRIC),
     (NodeType.VALUATION, EdgeType.DEPENDS_ON, NodeType.CALCULATION),
+    (NodeType.VALUATION, EdgeType.DEPENDS_ON, NodeType.CATALYST_IMPACT),
 
     (NodeType.RECOMMENDATION, EdgeType.DEPENDS_ON, NodeType.VALUATION),
     (NodeType.RECOMMENDATION, EdgeType.DEPENDS_ON, NodeType.CLAIM),

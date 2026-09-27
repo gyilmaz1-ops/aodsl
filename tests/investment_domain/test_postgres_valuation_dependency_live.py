@@ -5,7 +5,7 @@ from decimal import Decimal
 import pytest
 
 from investment_domain.identity import canonical_id
-from investment_domain.nodes import Estimate, Valuation
+from investment_domain.nodes import CatalystImpact, Estimate, Valuation
 from investment_domain.postgres_migrations import PostgreSQLMigrationManager
 from investment_domain.postgres_repository import (
     PostgreSQLEvidenceRepository,
@@ -29,6 +29,25 @@ def _valuation() -> Valuation:
     }
     return Valuation(
         id=canonical_id("valuation", payload),
+        **payload,
+    )
+
+
+def _catalyst_impact() -> CatalystImpact:
+    payload = {
+        "catalyst_id": "catalyst:nvda:blackwell-demand",
+        "target_id": "security:nasdaq:nvda",
+        "direction": "POSITIVE",
+        "magnitude": "HIGH",
+        "probability": Decimal("0.80"),
+        "confidence": Decimal("0.90"),
+        "horizon": "MEDIUM_TERM",
+        "rationale": "Demand catalyst affects valuation assumptions.",
+        "as_of": datetime(2026, 9, 26, tzinfo=UTC),
+        "created_by": "test-agent",
+    }
+    return CatalystImpact(
+        id=canonical_id("catalyst_impact", payload),
         **payload,
     )
 
@@ -67,10 +86,15 @@ def repo():
             )
             con.execute("DELETE FROM valuation_facts")
             con.execute("DELETE FROM estimate_facts")
+            con.execute("DELETE FROM catalyst_impact_facts")
             con.execute(
                 """
                 DELETE FROM domain_nodes
-                WHERE node_type IN ('Valuation', 'Estimate')
+                WHERE node_type IN (
+                    'Valuation',
+                    'Estimate',
+                    'CatalystImpact'
+                )
                 """
             )
 
@@ -625,3 +649,46 @@ def test_valuation_dependency_aggregate_rolls_back_on_second_insert_failure(
                         reject_second_valuation_dependency_for_atomicity_test()
                     """
                 )
+
+
+
+def test_valuation_dependency_on_catalyst_impact_is_persisted(repo):
+    valuation = _valuation()
+    impact = _catalyst_impact()
+
+    repo.add_valuation(valuation)
+    repo.add_catalyst_impact(impact)
+
+    repo.add_valuation_dependencies(
+        valuation.id,
+        (impact.id,),
+    )
+
+    assert _valuation_dependency_rows(
+        repo,
+        valuation.id,
+    ) == [
+        (impact.id, "CatalystImpact"),
+    ]
+
+
+def test_mixed_valuation_dependency_set_accepts_catalyst_impact(repo):
+    valuation = _valuation()
+    estimate = _estimate()
+    impact = _catalyst_impact()
+
+    repo.add_valuation(valuation)
+    repo.add_estimate(estimate)
+    repo.add_catalyst_impact(impact)
+
+    repo.add_valuation_dependencies(
+        valuation.id,
+        (estimate.id, impact.id),
+    )
+
+    assert set(
+        _valuation_dependency_rows(repo, valuation.id)
+    ) == {
+        (estimate.id, "Estimate"),
+        (impact.id, "CatalystImpact"),
+    }

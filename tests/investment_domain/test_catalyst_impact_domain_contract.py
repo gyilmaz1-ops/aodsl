@@ -299,3 +299,14 @@ def test_catalyst_impact_accepts_canonical_forecast_target():
     from investment_domain.validation import validate_node
 
     validate_node(_impact())
+
+
+def test_valuation_may_depend_on_catalyst_impact():
+    from investment_domain.edges import ALLOWED_EDGES, EdgeType
+    from investment_domain.types import NodeType
+
+    assert (
+        NodeType.VALUATION,
+        EdgeType.DEPENDS_ON,
+        NodeType.CATALYST_IMPACT,
+    ) in ALLOWED_EDGES
