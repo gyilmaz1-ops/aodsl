@@ -47,6 +47,41 @@ METRIC_DEFINITIONS: dict[str, MetricDefinition] = {
         period_kind=MetricPeriodKind.INSTANT,
         requires_currency=True,
     ),
+    "financial.free_cash_flow": MetricDefinition(
+        name="financial.free_cash_flow",
+        subject_type=NodeType.COMPANY,
+        unit="currency",
+        period_kind=MetricPeriodKind.DURATION,
+        requires_currency=True,
+    ),
+    "valuation.wacc": MetricDefinition(
+        name="valuation.wacc",
+        subject_type=NodeType.COMPANY,
+        unit="ratio",
+        period_kind=MetricPeriodKind.INSTANT,
+        requires_currency=False,
+    ),
+    "valuation.terminal_growth_rate": MetricDefinition(
+        name="valuation.terminal_growth_rate",
+        subject_type=NodeType.COMPANY,
+        unit="ratio",
+        period_kind=MetricPeriodKind.INSTANT,
+        requires_currency=False,
+    ),
+    "financial.net_debt": MetricDefinition(
+        name="financial.net_debt",
+        subject_type=NodeType.COMPANY,
+        unit="currency",
+        period_kind=MetricPeriodKind.INSTANT,
+        requires_currency=True,
+    ),
+    "market.diluted_shares_outstanding": MetricDefinition(
+        name="market.diluted_shares_outstanding",
+        subject_type=NodeType.SECURITY,
+        unit="shares",
+        period_kind=MetricPeriodKind.INSTANT,
+        requires_currency=False,
+    ),
 }
 
 

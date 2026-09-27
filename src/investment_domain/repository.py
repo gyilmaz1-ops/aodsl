@@ -15,6 +15,7 @@ from .nodes import (
     Catalyst,
     Forecast,
     Metric,
+    Security,
     Valuation,
 )
 from .metrics import MetricEvidenceLink
@@ -22,6 +23,18 @@ from .metrics import MetricEvidenceLink
 
 class EvidenceRepository(Protocol):
     """Persistence-independent Evidence/Claim repository contract."""
+
+    def add_security(
+        self,
+        security: Security,
+    ) -> None:
+        ...
+
+    def security(
+        self,
+        security_id: str,
+    ) -> Security | None:
+        ...
 
     def add_claim(
         self,
@@ -115,6 +128,12 @@ class EvidenceRepository(Protocol):
         Forecast | Estimate | Metric | Calculation | CatalystImpact,
         ...,
     ]:
+        ...
+
+    def verify_valuation(
+        self,
+        valuation_id: str,
+    ) -> Valuation:
         ...
 
     def add_estimate_inputs(

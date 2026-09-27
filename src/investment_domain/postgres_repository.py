@@ -28,11 +28,17 @@ from .nodes import (
     Evidence,
     Forecast,
     Metric,
+    Security,
     Valuation,
 )
 from .temporal import active_revision_at, available_at
 from .types import NodeType
 from .validation import validate_edge, validate_node
+from .valuations import (
+    ValuationEvaluationError,
+    ValuationInputResolutionError,
+    evaluate_dcf_v1,
+)
 
 
 class RepositoryReadError(RuntimeError):
@@ -1828,6 +1834,294 @@ class PostgreSQLEvidenceRepository:
                         "IDM-W532: VALUATION_PROJECTION_WRITE_LOST"
                     )
 
+    def _load_exact_estimate(
+        self,
+        con,
+        estimate_id: str,
+    ) -> Estimate:
+        row = con.execute(
+            """
+            SELECT
+                n.node_type,
+                n.canonical_payload,
+                n.payload_hash,
+                e.node_type,
+                e.subject_id,
+                e.metric_name,
+                e.period_end,
+                e.value,
+                e.unit,
+                e.scenario,
+                e.model_version,
+                e.as_of,
+                e.currency
+            FROM domain_nodes AS n
+            LEFT JOIN estimate_facts AS e
+              ON e.node_id = n.id
+            WHERE n.id = %s
+            """,
+            (estimate_id,),
+        ).fetchone()
+
+        if (
+            row is None
+            or str(row[0]) != NodeType.ESTIMATE.value
+            or row[3] is None
+        ):
+            raise RepositoryReadError(
+                "IDM-R554: VALUATION_DEPENDENCY_INTEGRITY_FAILURE"
+            )
+
+        try:
+            estimate = Estimate(
+                id=estimate_id,
+                subject_id=row[4],
+                metric_name=row[5],
+                period_end=row[6],
+                value=row[7],
+                unit=row[8],
+                scenario=row[9],
+                model_version=row[10],
+                as_of=row[11],
+                currency=row[12],
+            )
+            validate_node(estimate)
+        except (TypeError, ValueError) as exc:
+            raise RepositoryReadError(
+                "IDM-R554: VALUATION_DEPENDENCY_INTEGRITY_FAILURE"
+            ) from exc
+
+        payload, payload_hash = self._payload(estimate)
+        if (
+            row[1] != json.loads(payload)
+            or str(row[2]) != payload_hash
+            or str(row[3]) != NodeType.ESTIMATE.value
+        ):
+            raise RepositoryReadError(
+                "IDM-R554: VALUATION_DEPENDENCY_INTEGRITY_FAILURE"
+            )
+
+        return estimate
+
+    def _load_exact_forecast(
+        self,
+        con,
+        forecast_id: str,
+    ) -> Forecast:
+        row = con.execute(
+            """
+            SELECT
+                n.node_type,
+                n.canonical_payload,
+                n.payload_hash,
+                f.node_type,
+                f.subject_id,
+                f.scenario,
+                f.as_of,
+                f.model_version
+            FROM domain_nodes AS n
+            LEFT JOIN forecast_facts AS f
+              ON f.node_id = n.id
+            WHERE n.id = %s
+            """,
+            (forecast_id,),
+        ).fetchone()
+
+        if (
+            row is None
+            or str(row[0]) != NodeType.FORECAST.value
+            or row[3] is None
+        ):
+            raise RepositoryReadError(
+                "IDM-R554: VALUATION_DEPENDENCY_INTEGRITY_FAILURE"
+            )
+
+        try:
+            forecast = Forecast(
+                id=forecast_id,
+                subject_id=row[4],
+                scenario=row[5],
+                as_of=row[6],
+                model_version=row[7],
+            )
+            validate_node(forecast)
+        except (TypeError, ValueError) as exc:
+            raise RepositoryReadError(
+                "IDM-R554: VALUATION_DEPENDENCY_INTEGRITY_FAILURE"
+            ) from exc
+
+        payload, payload_hash = self._payload(forecast)
+        if (
+            row[1] != json.loads(payload)
+            or str(row[2]) != payload_hash
+            or str(row[3]) != NodeType.FORECAST.value
+        ):
+            raise RepositoryReadError(
+                "IDM-R554: VALUATION_DEPENDENCY_INTEGRITY_FAILURE"
+            )
+
+        return forecast
+
+    def _load_exact_catalyst_impact(
+        self,
+        con,
+        catalyst_impact_id: str,
+    ) -> CatalystImpact:
+        anchor = con.execute(
+            """
+            SELECT
+                node_type,
+                canonical_payload,
+                payload_hash
+            FROM domain_nodes
+            WHERE id = %s
+            """,
+            (catalyst_impact_id,),
+        ).fetchone()
+
+        if (
+            anchor is None
+            or str(anchor[0]) != NodeType.CATALYST_IMPACT.value
+        ):
+            raise RepositoryReadError(
+                "IDM-R554: VALUATION_DEPENDENCY_INTEGRITY_FAILURE"
+            )
+
+        row = con.execute(
+            """
+            SELECT
+                node_type,
+                catalyst_id,
+                target_id,
+                direction,
+                magnitude,
+                probability,
+                confidence,
+                horizon,
+                rationale,
+                as_of,
+                created_by
+            FROM catalyst_impact_facts
+            WHERE node_id = %s
+            """,
+            (catalyst_impact_id,),
+        ).fetchone()
+
+        if (
+            row is None
+            or str(row[0]) != NodeType.CATALYST_IMPACT.value
+        ):
+            raise RepositoryReadError(
+                "IDM-R554: VALUATION_DEPENDENCY_INTEGRITY_FAILURE"
+            )
+
+        try:
+            catalyst_impact = CatalystImpact(
+                id=catalyst_impact_id,
+                catalyst_id=str(row[1]),
+                target_id=str(row[2]),
+                direction=str(row[3]),
+                magnitude=str(row[4]),
+                probability=row[5],
+                confidence=row[6],
+                horizon=str(row[7]),
+                rationale=str(row[8]),
+                as_of=row[9],
+                created_by=str(row[10]),
+            )
+            validate_node(catalyst_impact)
+        except (TypeError, ValueError) as exc:
+            raise RepositoryReadError(
+                "IDM-R554: VALUATION_DEPENDENCY_INTEGRITY_FAILURE"
+            ) from exc
+
+        payload, payload_hash = self._payload(catalyst_impact)
+        if (
+            anchor[1] != json.loads(payload)
+            or str(anchor[2]) != payload_hash
+        ):
+            raise RepositoryReadError(
+                "IDM-R554: VALUATION_DEPENDENCY_INTEGRITY_FAILURE"
+            )
+
+        return catalyst_impact
+
+    def _load_exact_valuation(
+        self,
+        con,
+        valuation_id: str,
+    ) -> Valuation:
+        row = con.execute(
+            """
+            SELECT
+                n.node_type,
+                n.canonical_payload,
+                n.payload_hash,
+                v.node_type,
+                v.security_id,
+                v.method,
+                v.value,
+                v.currency,
+                v.as_of,
+                v.model_version,
+                v.scenario
+            FROM domain_nodes AS n
+            LEFT JOIN valuation_facts AS v
+              ON v.node_id = n.id
+            WHERE n.id = %s
+            """,
+            (valuation_id,),
+        ).fetchone()
+
+        if row is None:
+            raise RepositoryReadError(
+                "IDM-R545: VALUATION_NOT_FOUND"
+            )
+
+        if str(row[0]) != NodeType.VALUATION.value:
+            raise RepositoryReadError(
+                "IDM-R546: VALUATION_TYPE_MISMATCH"
+            )
+
+        if row[3] is None:
+            raise RepositoryReadError(
+                "IDM-R547: VALUATION_PROJECTION_NOT_FOUND"
+            )
+
+        try:
+            valuation = Valuation(
+                id=valuation_id,
+                security_id=row[4],
+                method=row[5],
+                value=row[6],
+                currency=row[7],
+                as_of=row[8],
+                model_version=row[9],
+                scenario=row[10],
+            )
+            validate_node(valuation)
+        except (TypeError, ValueError) as exc:
+            raise RepositoryReadError(
+                "IDM-R548: INVALID_STORED_VALUATION"
+            ) from exc
+
+        payload, payload_hash = self._payload(valuation)
+
+        if (
+            row[1] != json.loads(payload)
+            or str(row[2]) != payload_hash
+        ):
+            raise RepositoryReadError(
+                "IDM-R549: VALUATION_INTEGRITY_FAILURE"
+            )
+
+        if str(row[3]) != NodeType.VALUATION.value:
+            raise RepositoryReadError(
+                "IDM-R548: INVALID_STORED_VALUATION"
+            )
+
+        return valuation
+
     def valuation_inputs_at(
         self,
         valuation_id: str,
@@ -1853,74 +2147,10 @@ class PostgreSQLEvidenceRepository:
             )
 
         with self.connect() as con:
-            valuation_row = con.execute(
-                """
-                SELECT
-                    n.node_type,
-                    n.canonical_payload,
-                    n.payload_hash,
-                    v.node_type,
-                    v.security_id,
-                    v.method,
-                    v.value,
-                    v.currency,
-                    v.as_of,
-                    v.model_version,
-                    v.scenario
-                FROM domain_nodes AS n
-                LEFT JOIN valuation_facts AS v
-                  ON v.node_id = n.id
-                WHERE n.id = %s
-                """,
-                (valuation_id,),
-            ).fetchone()
-
-            if valuation_row is None:
-                raise RepositoryReadError(
-                    "IDM-R545: VALUATION_NOT_FOUND"
-                )
-
-            if str(valuation_row[0]) != NodeType.VALUATION.value:
-                raise RepositoryReadError(
-                    "IDM-R546: VALUATION_TYPE_MISMATCH"
-                )
-
-            if valuation_row[3] is None:
-                raise RepositoryReadError(
-                    "IDM-R547: VALUATION_PROJECTION_NOT_FOUND"
-                )
-
-            try:
-                valuation = Valuation(
-                    id=valuation_id,
-                    security_id=valuation_row[4],
-                    method=valuation_row[5],
-                    value=valuation_row[6],
-                    currency=valuation_row[7],
-                    as_of=valuation_row[8],
-                    model_version=valuation_row[9],
-                    scenario=valuation_row[10],
-                )
-                validate_node(valuation)
-            except (TypeError, ValueError) as exc:
-                raise RepositoryReadError(
-                    "IDM-R548: INVALID_STORED_VALUATION"
-                ) from exc
-
-            payload, payload_hash = self._payload(valuation)
-
-            if (
-                valuation_row[1] != json.loads(payload)
-                or str(valuation_row[2]) != payload_hash
-            ):
-                raise RepositoryReadError(
-                    "IDM-R549: VALUATION_INTEGRITY_FAILURE"
-                )
-
-            if str(valuation_row[3]) != NodeType.VALUATION.value:
-                raise RepositoryReadError(
-                    "IDM-R548: INVALID_STORED_VALUATION"
-                )
+            valuation = self._load_exact_valuation(
+                con,
+                valuation_id,
+            )
 
             if valuation.as_of > research_cutoff:
                 raise RepositoryReadError(
@@ -3087,6 +3317,81 @@ class PostgreSQLEvidenceRepository:
                         metric,
                     )
 
+    def add_security(
+        self,
+        security: Security,
+    ) -> None:
+        validate_node(security)
+        payload, payload_hash = self._payload(security)
+
+        with self.connect() as con:
+            with con.transaction():
+                self._insert_domain_node(
+                    con,
+                    node_id=security.id,
+                    node_type=security.node_type.value,
+                    payload=payload,
+                    payload_hash=payload_hash,
+                )
+
+    def _load_exact_security(
+        self,
+        con,
+        security_id: str,
+    ) -> Security | None:
+        row = con.execute(
+            """
+            SELECT
+                canonical_payload,
+                payload_hash
+            FROM domain_nodes
+            WHERE id = %s
+              AND node_type = 'Security'
+            """,
+            (security_id,),
+        ).fetchone()
+
+        if row is None:
+            return None
+
+        stored_payload, stored_hash = row
+
+        if canonical_sha256(stored_payload) != str(stored_hash):
+            raise RepositoryReadError(
+                "IDM-R505: STORED_NODE_INTEGRITY_FAILURE"
+            )
+
+        try:
+            security = Security(
+                id=str(stored_payload["id"]),
+                company_id=str(stored_payload["company_id"]),
+                venue=str(stored_payload["venue"]),
+                ticker=str(stored_payload["ticker"]),
+                currency=str(stored_payload["currency"]),
+            )
+            validate_node(security)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise RepositoryReadError(
+                "IDM-R553: INVALID_STORED_SECURITY_PAYLOAD"
+            ) from exc
+
+        self._assert_stored_node_integrity(
+            node=security,
+            stored_payload=stored_payload,
+            stored_hash=str(stored_hash),
+        )
+        return security
+
+    def security(
+        self,
+        security_id: str,
+    ) -> Security | None:
+        with self.connect() as con:
+            return self._load_exact_security(
+                con,
+                security_id,
+            )
+
     def add_claim(self, claim: Claim) -> None:
         validate_node(claim)
 
@@ -3950,6 +4255,126 @@ class PostgreSQLEvidenceRepository:
         finally:
             visiting.remove(calculation_id)
 
+
+    def verify_valuation(
+        self,
+        valuation_id: str,
+    ) -> Valuation:
+        if not is_canonical_content_id(
+            valuation_id,
+            kind="valuation",
+        ):
+            raise ValueError(
+                "valuation_id must be a canonical Valuation ID"
+            )
+
+        with self.connect() as con:
+            valuation = self._load_exact_valuation(
+                con,
+                valuation_id,
+            )
+
+            security = self._load_exact_security(
+                con,
+                valuation.security_id,
+            )
+            if security is None:
+                raise RepositoryReadError(
+                    "IDM-R555: VALUATION_SECURITY_NOT_FOUND"
+                )
+
+            rows = con.execute(
+                """
+                SELECT
+                    target_id,
+                    target_type
+                FROM domain_edges
+                WHERE source_id = %s
+                  AND source_type = 'Valuation'
+                  AND edge_type = 'DEPENDS_ON'
+                ORDER BY target_id
+                """,
+                (valuation_id,),
+            ).fetchall()
+
+            dependencies = []
+            calculation_memo = {}
+
+            for target_id, target_type in rows:
+                target_id = str(target_id)
+                target_type = str(target_type)
+
+                if target_type == NodeType.ESTIMATE.value:
+                    dependency = self._load_exact_estimate(
+                        con,
+                        target_id,
+                    )
+
+                elif target_type == NodeType.FORECAST.value:
+                    dependency = self._load_exact_forecast(
+                        con,
+                        target_id,
+                    )
+
+                elif target_type == NodeType.METRIC.value:
+                    try:
+                        dependency = self._load_exact_metric(
+                            con,
+                            target_id,
+                        )
+                    except RepositoryReadError as exc:
+                        raise RepositoryReadError(
+                            "IDM-R554: "
+                            "VALUATION_DEPENDENCY_INTEGRITY_FAILURE"
+                        ) from exc
+
+                elif target_type == NodeType.CALCULATION.value:
+                    try:
+                        dependency, _ = (
+                            self._verify_calculation_reproducibility(
+                                con,
+                                target_id,
+                                set(),
+                                calculation_memo,
+                            )
+                        )
+                    except RepositoryReadError as exc:
+                        raise RepositoryReadError(
+                            "IDM-R554: "
+                            "VALUATION_DEPENDENCY_INTEGRITY_FAILURE"
+                        ) from exc
+
+                elif target_type == NodeType.CATALYST_IMPACT.value:
+                    dependency = self._load_exact_catalyst_impact(
+                        con,
+                        target_id,
+                    )
+
+                else:
+                    raise RepositoryReadError(
+                        "IDM-R556: "
+                        "VALUATION_DEPENDENCY_TYPE_UNSUPPORTED"
+                    )
+
+                dependencies.append(dependency)
+
+            try:
+                evaluate_dcf_v1(
+                    tuple(dependencies),
+                    valuation=valuation,
+                    security=security,
+                    verify_materialized=True,
+                )
+            except (
+                ValuationInputResolutionError,
+                ValuationEvaluationError,
+            ) as exc:
+                raise RepositoryReadError(
+                    "IDM-R557: "
+                    "VALUATION_REPRODUCIBILITY_FAILURE"
+                ) from exc
+
+            return valuation
 
     def verify_calculation(
         self,
