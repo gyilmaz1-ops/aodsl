@@ -22,6 +22,7 @@ from .metrics import (
 from .nodes import (
     Calculation,
     Catalyst,
+    CatalystImpact,
     Claim,
     Estimate,
     Evidence,
@@ -838,6 +839,55 @@ class PostgreSQLEvidenceRepository:
                         "IDM-W528: ESTIMATE_PROJECTION_WRITE_LOST"
                     )
 
+    @staticmethod
+    def _assert_catalyst_impact_projection_matches(
+        con,
+        catalyst_impact: CatalystImpact,
+    ) -> None:
+        row = con.execute(
+            """
+            SELECT
+                node_type,
+                catalyst_id,
+                target_id,
+                direction,
+                magnitude,
+                probability,
+                confidence,
+                horizon,
+                rationale,
+                as_of,
+                created_by
+            FROM catalyst_impact_facts
+            WHERE node_id = %s
+            """,
+            (catalyst_impact.id,),
+        ).fetchone()
+
+        if row is None:
+            raise RepositoryWriteError(
+                "IDM-W544: CATALYST_IMPACT_PROJECTION_WRITE_LOST"
+            )
+
+        expected = (
+            catalyst_impact.node_type.value,
+            catalyst_impact.catalyst_id,
+            catalyst_impact.target_id,
+            catalyst_impact.direction,
+            catalyst_impact.magnitude,
+            catalyst_impact.probability,
+            catalyst_impact.confidence,
+            catalyst_impact.horizon,
+            catalyst_impact.rationale,
+            catalyst_impact.as_of,
+            catalyst_impact.created_by,
+        )
+
+        if tuple(row) != expected:
+            raise RepositoryWriteError(
+                "IDM-W545: CATALYST_IMPACT_PROJECTION_MISMATCH"
+            )
+
     def add_catalyst(
         self,
         catalyst: Catalyst,
@@ -929,6 +979,117 @@ class PostgreSQLEvidenceRepository:
                 if result.rowcount != 1:
                     raise RepositoryWriteError(
                         "IDM-W541: CATALYST_PROJECTION_WRITE_LOST"
+                    )
+
+    def add_catalyst_impact(
+        self,
+        catalyst_impact: CatalystImpact,
+    ) -> None:
+        validate_node(catalyst_impact)
+        payload, payload_hash = self._payload(catalyst_impact)
+
+        with self.connect() as con:
+            with con.transaction():
+                node_exists = (
+                    con.execute(
+                        """
+                        SELECT 1
+                        FROM domain_nodes
+                        WHERE id = %s
+                        """,
+                        (catalyst_impact.id,),
+                    ).fetchone()
+                    is not None
+                )
+
+                projection_exists = (
+                    con.execute(
+                        """
+                        SELECT 1
+                        FROM catalyst_impact_facts
+                        WHERE node_id = %s
+                        """,
+                        (catalyst_impact.id,),
+                    ).fetchone()
+                    is not None
+                )
+
+                if node_exists and not projection_exists:
+                    raise RepositoryWriteError(
+                        "IDM-W544: "
+                        "CATALYST_IMPACT_PROJECTION_WRITE_LOST"
+                    )
+
+                if projection_exists and not node_exists:
+                    raise RepositoryWriteError(
+                        "IDM-W546: "
+                        "CATALYST_IMPACT_ORPHAN_PROJECTION"
+                    )
+
+                if node_exists:
+                    self._assert_existing_node_matches(
+                        con,
+                        node_id=catalyst_impact.id,
+                        node_type=catalyst_impact.node_type.value,
+                        payload=payload,
+                        payload_hash=payload_hash,
+                    )
+                    self._assert_catalyst_impact_projection_matches(
+                        con,
+                        catalyst_impact,
+                    )
+                    return
+
+                self._insert_domain_node(
+                    con,
+                    node_id=catalyst_impact.id,
+                    node_type=catalyst_impact.node_type.value,
+                    payload=payload,
+                    payload_hash=payload_hash,
+                )
+
+                result = con.execute(
+                    """
+                    INSERT INTO catalyst_impact_facts (
+                        node_id,
+                        node_type,
+                        catalyst_id,
+                        target_id,
+                        direction,
+                        magnitude,
+                        probability,
+                        confidence,
+                        horizon,
+                        rationale,
+                        as_of,
+                        created_by
+                    )
+                    VALUES (
+                        %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s, %s
+                    )
+                    ON CONFLICT (node_id) DO NOTHING
+                    """,
+                    (
+                        catalyst_impact.id,
+                        catalyst_impact.node_type.value,
+                        catalyst_impact.catalyst_id,
+                        catalyst_impact.target_id,
+                        catalyst_impact.direction,
+                        catalyst_impact.magnitude,
+                        catalyst_impact.probability,
+                        catalyst_impact.confidence,
+                        catalyst_impact.horizon,
+                        catalyst_impact.rationale,
+                        catalyst_impact.as_of,
+                        catalyst_impact.created_by,
+                    ),
+                )
+
+                if result.rowcount != 1:
+                    raise RepositoryWriteError(
+                        "IDM-W544: "
+                        "CATALYST_IMPACT_PROJECTION_WRITE_LOST"
                     )
 
     def add_catalyst_affects(
@@ -3468,6 +3629,188 @@ class PostgreSQLEvidenceRepository:
                 )
             )
             return calculation
+
+    def catalyst_impact_at(
+        self,
+        catalyst_impact_id: str,
+        research_cutoff: datetime,
+    ) -> CatalystImpact | None:
+        if not is_canonical_content_id(
+            catalyst_impact_id,
+            kind="catalyst_impact",
+        ):
+            raise ValueError(
+                "catalyst_impact_id must be a canonical CatalystImpact ID"
+            )
+
+        if (
+            research_cutoff.tzinfo is None
+            or research_cutoff.utcoffset() is None
+        ):
+            raise ValueError(
+                "research_cutoff must be timezone-aware"
+            )
+
+        with self.connect() as con:
+            anchor = con.execute(
+                """
+                SELECT
+                    node_type,
+                    canonical_payload,
+                    payload_hash
+                FROM domain_nodes
+                WHERE id = %s
+                """,
+                (catalyst_impact_id,),
+            ).fetchone()
+
+            if anchor is None:
+                return None
+
+            if str(anchor[0]) != NodeType.CATALYST_IMPACT.value:
+                raise RepositoryReadError(
+                    "IDM-R540: CATALYST_IMPACT_TYPE_MISMATCH"
+                )
+
+            row = con.execute(
+                """
+                SELECT
+                    node_type,
+                    catalyst_id,
+                    target_id,
+                    direction,
+                    magnitude,
+                    probability,
+                    confidence,
+                    horizon,
+                    rationale,
+                    as_of,
+                    created_by
+                FROM catalyst_impact_facts
+                WHERE node_id = %s
+                """,
+                (catalyst_impact_id,),
+            ).fetchone()
+
+            if row is None:
+                raise RepositoryReadError(
+                    "IDM-R543: "
+                    "CATALYST_IMPACT_PROJECTION_NOT_FOUND"
+                )
+
+            if str(row[0]) != NodeType.CATALYST_IMPACT.value:
+                raise RepositoryReadError(
+                    "IDM-R540: CATALYST_IMPACT_TYPE_MISMATCH"
+                )
+
+            try:
+                catalyst_impact = CatalystImpact(
+                    id=catalyst_impact_id,
+                    catalyst_id=str(row[1]),
+                    target_id=str(row[2]),
+                    direction=str(row[3]),
+                    magnitude=str(row[4]),
+                    probability=row[5],
+                    confidence=row[6],
+                    horizon=str(row[7]),
+                    rationale=str(row[8]),
+                    as_of=row[9],
+                    created_by=str(row[10]),
+                )
+                validate_node(catalyst_impact)
+            except (TypeError, ValueError) as exc:
+                raise RepositoryReadError(
+                    "IDM-R541: "
+                    "INVALID_STORED_CATALYST_IMPACT"
+                ) from exc
+
+            payload, payload_hash = self._payload(
+                catalyst_impact
+            )
+
+            if (
+                anchor[1] != json.loads(payload)
+                or str(anchor[2]) != payload_hash
+            ):
+                raise RepositoryReadError(
+                    "IDM-R542: "
+                    "CATALYST_IMPACT_INTEGRITY_FAILURE"
+                )
+
+            if catalyst_impact.as_of > research_cutoff:
+                return None
+
+            return catalyst_impact
+
+    def latest_catalyst_impact_at(
+        self,
+        catalyst_id: str,
+        target_id: str,
+        research_cutoff: datetime,
+    ) -> CatalystImpact | None:
+        if not isinstance(catalyst_id, str) or not catalyst_id.strip():
+            raise ValueError(
+                "catalyst_id must not be empty"
+            )
+
+        if not isinstance(target_id, str) or not target_id.strip():
+            raise ValueError(
+                "target_id must not be empty"
+            )
+
+        if (
+            research_cutoff.tzinfo is None
+            or research_cutoff.utcoffset() is None
+        ):
+            raise ValueError(
+                "research_cutoff must be timezone-aware"
+            )
+
+        # Pair-level PIT lookup is visibility-first. Future independent
+        # assessments are outside the historical information set and must
+        # not be integrity-traversed by this query.
+        with self.connect() as con:
+            rows = con.execute(
+                """
+                SELECT node_id
+                FROM catalyst_impact_facts
+                WHERE catalyst_id = %s
+                  AND target_id = %s
+                  AND as_of = (
+                      SELECT MAX(as_of)
+                      FROM catalyst_impact_facts
+                      WHERE catalyst_id = %s
+                        AND target_id = %s
+                        AND as_of <= %s
+                  )
+                ORDER BY node_id
+                """,
+                (
+                    catalyst_id,
+                    target_id,
+                    catalyst_id,
+                    target_id,
+                    research_cutoff,
+                ),
+            ).fetchall()
+
+        if not rows:
+            return None
+
+        # Same pair + same latest visible as_of has no deterministic
+        # semantic winner. Ordering above is only deterministic observation,
+        # never a tie-break selection rule.
+        if len(rows) != 1:
+            raise RepositoryReadError(
+                "IDM-R544: CATALYST_IMPACT_PIT_AMBIGUITY"
+            )
+
+        # The selected PIT-visible assessment still receives the complete
+        # exact-ID integrity contract before it can be returned.
+        return self.catalyst_impact_at(
+            str(rows[0][0]),
+            research_cutoff,
+        )
 
     def calculation_at(
         self,

@@ -7,6 +7,7 @@ from typing import Protocol
 from .claims import ClaimEvidenceLink
 from .edges import EdgeType
 from .nodes import (
+    CatalystImpact,
     Calculation,
     Claim,
     Estimate,
@@ -56,6 +57,27 @@ class EvidenceRepository(Protocol):
         self,
         catalyst: Catalyst,
     ) -> None:
+        ...
+
+    def add_catalyst_impact(
+        self,
+        catalyst_impact: CatalystImpact,
+    ) -> None:
+        ...
+
+    def catalyst_impact_at(
+        self,
+        catalyst_impact_id: str,
+        research_cutoff: datetime,
+    ) -> CatalystImpact | None:
+        ...
+
+    def latest_catalyst_impact_at(
+        self,
+        catalyst_id: str,
+        target_id: str,
+        research_cutoff: datetime,
+    ) -> CatalystImpact | None:
         ...
 
     def add_catalyst_affects(
