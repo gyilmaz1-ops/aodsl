@@ -1735,104 +1735,113 @@ class PostgreSQLEvidenceRepository:
         self,
         valuation: Valuation,
     ) -> None:
-        validate_node(valuation)
-
-        payload, payload_hash = self._payload(valuation)
-
         with self.connect() as con:
             with con.transaction():
-                node_exists = (
-                    con.execute(
-                        """
-                        SELECT 1
-                        FROM domain_nodes
-                        WHERE id = %s
-                        """,
-                        (valuation.id,),
-                    ).fetchone()
-                    is not None
-                )
-
-                projection_exists = (
-                    con.execute(
-                        """
-                        SELECT 1
-                        FROM valuation_facts
-                        WHERE node_id = %s
-                        """,
-                        (valuation.id,),
-                    ).fetchone()
-                    is not None
-                )
-
-                if node_exists and not projection_exists:
-                    raise RepositoryWriteError(
-                        "IDM-W532: VALUATION_PROJECTION_WRITE_LOST"
-                    )
-
-                if projection_exists and not node_exists:
-                    raise RepositoryWriteError(
-                        "IDM-W534: VALUATION_ORPHAN_PROJECTION"
-                    )
-
-                if node_exists:
-                    self._assert_existing_node_matches(
-                        con,
-                        node_id=valuation.id,
-                        node_type=valuation.node_type.value,
-                        payload=payload,
-                        payload_hash=payload_hash,
-                    )
-                    self._assert_valuation_projection_matches(
-                        con,
-                        valuation,
-                    )
-                    return
-
-                self._insert_domain_node(
+                self._add_valuation_in_transaction(
                     con,
-                    node_id=valuation.id,
-                    node_type=valuation.node_type.value,
-                    payload=payload,
-                    payload_hash=payload_hash,
+                    valuation,
                 )
 
-                result = con.execute(
-                    """
-                    INSERT INTO valuation_facts (
-                        node_id,
-                        node_type,
-                        security_id,
-                        method,
-                        value,
-                        currency,
-                        as_of,
-                        model_version,
-                        scenario
-                    )
-                    VALUES (
-                        %s, %s, %s, %s, %s,
-                        %s, %s, %s, %s
-                    )
-                    ON CONFLICT (node_id) DO NOTHING
-                    """,
-                    (
-                        valuation.id,
-                        valuation.node_type.value,
-                        valuation.security_id,
-                        valuation.method,
-                        valuation.value,
-                        valuation.currency,
-                        valuation.as_of,
-                        valuation.model_version,
-                        valuation.scenario,
-                    ),
-                )
+    def _add_valuation_in_transaction(
+        self,
+        con,
+        valuation: Valuation,
+    ) -> None:
+        validate_node(valuation)
+        payload, payload_hash = self._payload(valuation)
 
-                if result.rowcount != 1:
-                    raise RepositoryWriteError(
-                        "IDM-W532: VALUATION_PROJECTION_WRITE_LOST"
-                    )
+        node_exists = (
+            con.execute(
+                """
+                SELECT 1
+                FROM domain_nodes
+                WHERE id = %s
+                """,
+                (valuation.id,),
+            ).fetchone()
+            is not None
+        )
+
+        projection_exists = (
+            con.execute(
+                """
+                SELECT 1
+                FROM valuation_facts
+                WHERE node_id = %s
+                """,
+                (valuation.id,),
+            ).fetchone()
+            is not None
+        )
+
+        if node_exists and not projection_exists:
+            raise RepositoryWriteError(
+                "IDM-W532: VALUATION_PROJECTION_WRITE_LOST"
+            )
+
+        if projection_exists and not node_exists:
+            raise RepositoryWriteError(
+                "IDM-W534: VALUATION_ORPHAN_PROJECTION"
+            )
+
+        if node_exists:
+            self._assert_existing_node_matches(
+                con,
+                node_id=valuation.id,
+                node_type=valuation.node_type.value,
+                payload=payload,
+                payload_hash=payload_hash,
+            )
+            self._assert_valuation_projection_matches(
+                con,
+                valuation,
+            )
+            return
+
+        self._insert_domain_node(
+            con,
+            node_id=valuation.id,
+            node_type=valuation.node_type.value,
+            payload=payload,
+            payload_hash=payload_hash,
+        )
+
+        result = con.execute(
+            """
+            INSERT INTO valuation_facts (
+                node_id,
+                node_type,
+                security_id,
+                method,
+                value,
+                currency,
+                as_of,
+                model_version,
+                scenario
+            )
+            VALUES (
+                %s, %s, %s, %s, %s,
+                %s, %s, %s, %s
+            )
+            ON CONFLICT (node_id) DO NOTHING
+            """,
+            (
+                valuation.id,
+                valuation.node_type.value,
+                valuation.security_id,
+                valuation.method,
+                valuation.value,
+                valuation.currency,
+                valuation.as_of,
+                valuation.model_version,
+                valuation.scenario,
+            ),
+        )
+
+        if result.rowcount != 1:
+            raise RepositoryWriteError(
+                "IDM-W532: VALUATION_PROJECTION_WRITE_LOST"
+            )
 
     def _load_exact_estimate(
         self,
@@ -2696,206 +2705,244 @@ class PostgreSQLEvidenceRepository:
 
         with self.connect() as con:
             with con.transaction():
-                source = con.execute(
-                    """
-                    SELECT node_type
-                    FROM domain_nodes
-                    WHERE id = %s
-                    FOR UPDATE
-                    """,
-                    (valuation_id,),
-                ).fetchone()
-
-                if source is None:
-                    raise RepositoryWriteError(
-                        "IDM-W507: EDGE_SOURCE_NOT_FOUND"
-                    )
-
-                if str(source[0]) != "Valuation":
-                    raise RepositoryWriteError(
-                        "IDM-W509: EDGE_SOURCE_TYPE_MISMATCH"
-                    )
-
-                projection = con.execute(
-                    """
-                    SELECT
-                        node_type,
-                        security_id,
-                        method,
-                        value,
-                        currency,
-                        as_of,
-                        model_version,
-                        scenario
-                    FROM valuation_facts
-                    WHERE node_id = %s
-                    """,
-                    (valuation_id,),
-                ).fetchone()
-
-                if projection is None:
-                    raise RepositoryWriteError(
-                        "IDM-W532: VALUATION_PROJECTION_WRITE_LOST"
-                    )
-
-                try:
-                    persisted_valuation = Valuation(
-                        id=valuation_id,
-                        security_id=projection[1],
-                        method=projection[2],
-                        value=projection[3],
-                        currency=projection[4],
-                        as_of=projection[5],
-                        model_version=projection[6],
-                        scenario=projection[7],
-                    )
-                    validate_node(persisted_valuation)
-                except (TypeError, ValueError) as exc:
-                    raise RepositoryWriteError(
-                        "IDM-W533: VALUATION_PROJECTION_MISMATCH"
-                    ) from exc
-
-                payload, payload_hash = self._payload(
-                    persisted_valuation
-                )
-                self._assert_existing_node_matches(
+                self._add_valuation_dependencies_in_transaction(
                     con,
-                    node_id=persisted_valuation.id,
-                    node_type=persisted_valuation.node_type.value,
-                    payload=payload,
-                    payload_hash=payload_hash,
-                )
-                self._assert_valuation_projection_matches(
-                    con,
-                    persisted_valuation,
+                    valuation_id,
+                    dependency_ids,
                 )
 
-                targets = {}
-                for target_id in dependency_ids:
-                    target = con.execute(
-                        """
-                        SELECT node_type
-                        FROM domain_nodes
-                        WHERE id = %s
-                        """,
-                        (target_id,),
-                    ).fetchone()
+    def _add_valuation_dependencies_in_transaction(
+        self,
+        con,
+        valuation_id: str,
+        dependency_ids: tuple[str, ...],
+    ) -> None:
+        if not isinstance(valuation_id, str) or not valuation_id.strip():
+            raise ValueError("valuation_id must not be empty")
+        if not is_canonical_content_id(
+            valuation_id,
+            kind="valuation",
+        ):
+            raise ValueError(
+                "valuation_id must be a canonical Valuation ID"
+            )
+        if not isinstance(dependency_ids, tuple) or not dependency_ids:
+            raise ValueError(
+                "dependency_ids must be a non-empty tuple"
+            )
+        if any(
+            not isinstance(dependency_id, str)
+            or not dependency_id.strip()
+            for dependency_id in dependency_ids
+        ):
+            raise ValueError(
+                "dependency_ids must contain non-empty strings"
+            )
+        if len(dependency_ids) != len(set(dependency_ids)):
+            raise ValueError(
+                "dependency_ids must not contain duplicates"
+            )
 
-                    if target is None:
-                        raise RepositoryWriteError(
-                            "IDM-W508: EDGE_TARGET_NOT_FOUND"
-                        )
+        source = con.execute(
+            """
+            SELECT node_type
+            FROM domain_nodes
+            WHERE id = %s
+            FOR UPDATE
+            """,
+            (valuation_id,),
+        ).fetchone()
 
-                    target_type = str(target[0])
-                    if target_type not in (
-                        "Forecast",
-                        "Estimate",
-                        "Metric",
-                        "Calculation",
-                        "CatalystImpact",
-                    ):
-                        raise RepositoryWriteError(
-                            "IDM-W510: EDGE_TARGET_TYPE_MISMATCH"
-                        )
+        if source is None:
+            raise RepositoryWriteError(
+                "IDM-W507: EDGE_SOURCE_NOT_FOUND"
+            )
 
-                    targets[target_id] = target_type
+        if str(source[0]) != "Valuation":
+            raise RepositoryWriteError(
+                "IDM-W509: EDGE_SOURCE_TYPE_MISMATCH"
+            )
 
-                existing_rows = con.execute(
-                    """
-                    SELECT target_id, target_type
-                    FROM domain_edges
-                    WHERE source_id = %s
-                      AND source_type = 'Valuation'
-                      AND edge_type = 'DEPENDS_ON'
-                    ORDER BY target_id
-                    """,
-                    (valuation_id,),
-                ).fetchall()
+        projection = con.execute(
+            """
+            SELECT
+                node_type,
+                security_id,
+                method,
+                value,
+                currency,
+                as_of,
+                model_version,
+                scenario
+            FROM valuation_facts
+            WHERE node_id = %s
+            """,
+            (valuation_id,),
+        ).fetchone()
 
-                existing = {
-                    (str(row[0]), str(row[1]))
-                    for row in existing_rows
-                }
-                expected = {
-                    (target_id, targets[target_id])
-                    for target_id in dependency_ids
-                }
+        if projection is None:
+            raise RepositoryWriteError(
+                "IDM-W532: VALUATION_PROJECTION_WRITE_LOST"
+            )
 
-                # Legal states:
-                #   empty -> complete aggregate write
-                #   exact complete set -> idempotent replay
-                # Any partial, extra, wrong-type or divergent set is
-                # persistent-state corruption and is never repaired.
-                if existing:
-                    if (
-                        existing != expected
-                        or len(existing_rows) != len(expected)
-                    ):
-                        raise RepositoryWriteError(
-                            "IDM-W535: "
-                            "VALUATION_DEPENDENCY_SET_MISMATCH"
-                        )
-                    return
+        try:
+            persisted_valuation = Valuation(
+                id=valuation_id,
+                security_id=projection[1],
+                method=projection[2],
+                value=projection[3],
+                currency=projection[4],
+                as_of=projection[5],
+                model_version=projection[6],
+                scenario=projection[7],
+            )
+            validate_node(persisted_valuation)
+        except (TypeError, ValueError) as exc:
+            raise RepositoryWriteError(
+                "IDM-W533: VALUATION_PROJECTION_MISMATCH"
+            ) from exc
 
-                # All endpoints have been validated before the first write.
-                for target_id in dependency_ids:
-                    result = con.execute(
-                        """
-                        INSERT INTO domain_edges (
-                            source_id,
-                            source_type,
-                            edge_type,
-                            target_id,
-                            target_type,
-                            created_at
-                        )
-                        VALUES (
-                            %s,
-                            'Valuation',
-                            'DEPENDS_ON',
-                            %s,
-                            %s,
-                            CURRENT_TIMESTAMP
-                        )
-                        ON CONFLICT DO NOTHING
-                        """,
-                        (
-                            valuation_id,
-                            target_id,
-                            targets[target_id],
-                        ),
-                    )
+        payload, payload_hash = self._payload(
+            persisted_valuation
+        )
+        self._assert_existing_node_matches(
+            con,
+            node_id=persisted_valuation.id,
+            node_type=persisted_valuation.node_type.value,
+            payload=payload,
+            payload_hash=payload_hash,
+        )
+        self._assert_valuation_projection_matches(
+            con,
+            persisted_valuation,
+        )
 
-                    if result.rowcount != 1:
-                        raise RepositoryWriteError(
-                            "IDM-W535: "
-                            "VALUATION_DEPENDENCY_SET_MISMATCH"
-                        )
+        targets = {}
+        for target_id in dependency_ids:
+            target = con.execute(
+                """
+                SELECT node_type
+                FROM domain_nodes
+                WHERE id = %s
+                """,
+                (target_id,),
+            ).fetchone()
 
-                persisted_rows = con.execute(
-                    """
-                    SELECT target_id, target_type
-                    FROM domain_edges
-                    WHERE source_id = %s
-                      AND source_type = 'Valuation'
-                      AND edge_type = 'DEPENDS_ON'
-                    """,
-                    (valuation_id,),
-                ).fetchall()
+            if target is None:
+                raise RepositoryWriteError(
+                    "IDM-W508: EDGE_TARGET_NOT_FOUND"
+                )
 
-                persisted = {
-                    (str(row[0]), str(row[1]))
-                    for row in persisted_rows
-                }
+            target_type = str(target[0])
+            if target_type not in (
+                "Forecast",
+                "Estimate",
+                "Metric",
+                "Calculation",
+                "CatalystImpact",
+            ):
+                raise RepositoryWriteError(
+                    "IDM-W510: EDGE_TARGET_TYPE_MISMATCH"
+                )
 
-                if (
-                    persisted != expected
-                    or len(persisted_rows) != len(expected)
-                ):
-                    raise RepositoryWriteError(
-                        "IDM-W535: "
-                        "VALUATION_DEPENDENCY_SET_MISMATCH"
-                    )
+            targets[target_id] = target_type
+
+        existing_rows = con.execute(
+            """
+            SELECT target_id, target_type
+            FROM domain_edges
+            WHERE source_id = %s
+              AND source_type = 'Valuation'
+              AND edge_type = 'DEPENDS_ON'
+            ORDER BY target_id
+            """,
+            (valuation_id,),
+        ).fetchall()
+
+        existing = {
+            (str(row[0]), str(row[1]))
+            for row in existing_rows
+        }
+        expected = {
+            (target_id, targets[target_id])
+            for target_id in dependency_ids
+        }
+
+        # Legal states:
+        #   empty -> complete aggregate write
+        #   exact complete set -> idempotent replay
+        # Any partial, extra, wrong-type or divergent set is
+        # persistent-state corruption and is never repaired.
+        if existing:
+            if (
+                existing != expected
+                or len(existing_rows) != len(expected)
+            ):
+                raise RepositoryWriteError(
+                    "IDM-W535: "
+                    "VALUATION_DEPENDENCY_SET_MISMATCH"
+                )
+            return
+
+        # All endpoints have been validated before the first write.
+        for target_id in dependency_ids:
+            result = con.execute(
+                """
+                INSERT INTO domain_edges (
+                    source_id,
+                    source_type,
+                    edge_type,
+                    target_id,
+                    target_type,
+                    created_at
+                )
+                VALUES (
+                    %s,
+                    'Valuation',
+                    'DEPENDS_ON',
+                    %s,
+                    %s,
+                    CURRENT_TIMESTAMP
+                )
+                ON CONFLICT DO NOTHING
+                """,
+                (
+                    valuation_id,
+                    target_id,
+                    targets[target_id],
+                ),
+            )
+
+            if result.rowcount != 1:
+                raise RepositoryWriteError(
+                    "IDM-W535: "
+                    "VALUATION_DEPENDENCY_SET_MISMATCH"
+                )
+
+        persisted_rows = con.execute(
+            """
+            SELECT target_id, target_type
+            FROM domain_edges
+            WHERE source_id = %s
+              AND source_type = 'Valuation'
+              AND edge_type = 'DEPENDS_ON'
+            """,
+            (valuation_id,),
+        ).fetchall()
+
+        persisted = {
+            (str(row[0]), str(row[1]))
+            for row in persisted_rows
+        }
+
+        if (
+            persisted != expected
+            or len(persisted_rows) != len(expected)
+        ):
+            raise RepositoryWriteError(
+                "IDM-W535: "
+                "VALUATION_DEPENDENCY_SET_MISMATCH"
+            )
 
     def add_calculation_inputs(
         self,
@@ -4379,6 +4426,37 @@ class PostgreSQLEvidenceRepository:
             visiting.remove(calculation_id)
 
 
+
+    def persist_verified_valuation(
+        self,
+        valuation: Valuation,
+        dependency_ids: tuple[str, ...],
+    ) -> Valuation:
+        validate_node(valuation)
+
+        with self.connect() as con:
+            with con.transaction():
+                self._add_valuation_in_transaction(
+                    con,
+                    valuation,
+                )
+                self._add_valuation_dependencies_in_transaction(
+                    con,
+                    valuation.id,
+                    dependency_ids,
+                )
+                verified = self._verify_valuation_in_connection(
+                    con,
+                    valuation.id,
+                )
+
+                if verified != valuation:
+                    raise RepositoryWriteError(
+                        "IDM-X014: VERIFIED_VALUATION_MISMATCH"
+                    )
+
+                return verified
+
     def verify_valuation(
         self,
         valuation_id: str,
@@ -4392,112 +4470,130 @@ class PostgreSQLEvidenceRepository:
             )
 
         with self.connect() as con:
-            valuation = self._load_exact_valuation(
+            return self._verify_valuation_in_connection(
                 con,
                 valuation_id,
             )
 
-            security = self._load_exact_security(
-                con,
-                valuation.security_id,
+    def _verify_valuation_in_connection(
+        self,
+        con,
+        valuation_id: str,
+    ) -> Valuation:
+        if not is_canonical_content_id(
+            valuation_id,
+            kind="valuation",
+        ):
+            raise ValueError(
+                "valuation_id must be a canonical Valuation ID"
             )
-            if security is None:
-                raise RepositoryReadError(
-                    "IDM-R555: VALUATION_SECURITY_NOT_FOUND"
+
+        valuation = self._load_exact_valuation(
+            con,
+            valuation_id,
+        )
+
+        security = self._load_exact_security(
+            con,
+            valuation.security_id,
+        )
+        if security is None:
+            raise RepositoryReadError(
+                "IDM-R555: VALUATION_SECURITY_NOT_FOUND"
+            )
+
+        rows = con.execute(
+            """
+            SELECT
+                target_id,
+                target_type
+            FROM domain_edges
+            WHERE source_id = %s
+              AND source_type = 'Valuation'
+              AND edge_type = 'DEPENDS_ON'
+            ORDER BY target_id
+            """,
+            (valuation_id,),
+        ).fetchall()
+
+        dependencies = []
+        calculation_memo = {}
+
+        for target_id, target_type in rows:
+            target_id = str(target_id)
+            target_type = str(target_type)
+
+            if target_type == NodeType.ESTIMATE.value:
+                dependency = self._load_exact_estimate(
+                    con,
+                    target_id,
                 )
 
-            rows = con.execute(
-                """
-                SELECT
+            elif target_type == NodeType.FORECAST.value:
+                dependency = self._load_exact_forecast(
+                    con,
                     target_id,
-                    target_type
-                FROM domain_edges
-                WHERE source_id = %s
-                  AND source_type = 'Valuation'
-                  AND edge_type = 'DEPENDS_ON'
-                ORDER BY target_id
-                """,
-                (valuation_id,),
-            ).fetchall()
+                )
 
-            dependencies = []
-            calculation_memo = {}
-
-            for target_id, target_type in rows:
-                target_id = str(target_id)
-                target_type = str(target_type)
-
-                if target_type == NodeType.ESTIMATE.value:
-                    dependency = self._load_exact_estimate(
+            elif target_type == NodeType.METRIC.value:
+                try:
+                    dependency = self._load_exact_metric(
                         con,
                         target_id,
                     )
+                except RepositoryReadError as exc:
+                    raise RepositoryReadError(
+                        "IDM-R554: "
+                        "VALUATION_DEPENDENCY_INTEGRITY_FAILURE"
+                    ) from exc
 
-                elif target_type == NodeType.FORECAST.value:
-                    dependency = self._load_exact_forecast(
-                        con,
-                        target_id,
-                    )
-
-                elif target_type == NodeType.METRIC.value:
-                    try:
-                        dependency = self._load_exact_metric(
+            elif target_type == NodeType.CALCULATION.value:
+                try:
+                    dependency, _ = (
+                        self._verify_calculation_reproducibility(
                             con,
                             target_id,
+                            set(),
+                            calculation_memo,
                         )
-                    except RepositoryReadError as exc:
-                        raise RepositoryReadError(
-                            "IDM-R554: "
-                            "VALUATION_DEPENDENCY_INTEGRITY_FAILURE"
-                        ) from exc
-
-                elif target_type == NodeType.CALCULATION.value:
-                    try:
-                        dependency, _ = (
-                            self._verify_calculation_reproducibility(
-                                con,
-                                target_id,
-                                set(),
-                                calculation_memo,
-                            )
-                        )
-                    except RepositoryReadError as exc:
-                        raise RepositoryReadError(
-                            "IDM-R554: "
-                            "VALUATION_DEPENDENCY_INTEGRITY_FAILURE"
-                        ) from exc
-
-                elif target_type == NodeType.CATALYST_IMPACT.value:
-                    dependency = self._load_exact_catalyst_impact(
-                        con,
-                        target_id,
                     )
-
-                else:
+                except RepositoryReadError as exc:
                     raise RepositoryReadError(
-                        "IDM-R556: "
-                        "VALUATION_DEPENDENCY_TYPE_UNSUPPORTED"
-                    )
+                        "IDM-R554: "
+                        "VALUATION_DEPENDENCY_INTEGRITY_FAILURE"
+                    ) from exc
 
-                dependencies.append(dependency)
-
-            try:
-                evaluate_dcf_v1(
-                    tuple(dependencies),
-                    valuation=valuation,
-                    security=security,
-                    verify_materialized=True,
+            elif target_type == NodeType.CATALYST_IMPACT.value:
+                dependency = self._load_exact_catalyst_impact(
+                    con,
+                    target_id,
                 )
-            except (
-                ValuationInputResolutionError,
-                ValuationEvaluationError,
-            ) as exc:
-                raise RepositoryReadError(
-                    "IDM-R557: "
-                    "VALUATION_REPRODUCIBILITY_FAILURE"
-                ) from exc
 
-            return valuation
+            else:
+                raise RepositoryReadError(
+                    "IDM-R556: "
+                    "VALUATION_DEPENDENCY_TYPE_UNSUPPORTED"
+                )
+
+            dependencies.append(dependency)
+
+        try:
+            evaluate_dcf_v1(
+                tuple(dependencies),
+                valuation=valuation,
+                security=security,
+                verify_materialized=True,
+            )
+        except (
+            ValuationInputResolutionError,
+            ValuationEvaluationError,
+        ) as exc:
+            raise RepositoryReadError(
+                "IDM-R557: "
+                "VALUATION_REPRODUCIBILITY_FAILURE"
+            ) from exc
+
+        return valuation
 
     def verify_calculation(
         self,

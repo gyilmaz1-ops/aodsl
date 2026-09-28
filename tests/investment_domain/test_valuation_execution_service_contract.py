@@ -148,11 +148,10 @@ class FakeRepository:
             else security()
         )
 
-        self.added_valuation = None
-        self.added_dependencies = None
+        self.persisted_valuation = None
+        self.persisted_dependencies = None
         self.cutoff = None
         self.requested_dependency_ids = None
-        self.verified_id = None
 
     def security(
         self,
@@ -177,66 +176,45 @@ class FakeRepository:
         self.cutoff = research_cutoff
         return self.resolved_inputs
 
-    def add_valuation(
+    def persist_verified_valuation(
         self,
         valuation,
-    ):
-        self.added_valuation = valuation
-
-    def add_valuation_dependencies(
-        self,
-        valuation_id,
         dependency_ids,
     ):
-        self.added_dependencies = (
-            valuation_id,
-            dependency_ids,
-        )
+        self.persisted_valuation = valuation
+        self.persisted_dependencies = dependency_ids
+        return valuation
 
-    def verify_valuation(
-        self,
-        valuation_id,
-    ):
-        self.verified_id = valuation_id
-        return self.added_valuation
 
 
 def test_service_executes_complete_boundary():
     resolved = inputs()
+    req = request(resolved)
     repo = FakeRepository(
         resolved_inputs=resolved
     )
 
     result = ValuationExecutionService(
         repo
-    ).execute(
-        request(resolved)
-    )
+    ).execute(req)
 
     assert result.valuation.value == Decimal(
         "10.80909090909090909090909090909091"
     )
-
     assert (
         result.valuation
-        == repo.added_valuation
+        == repo.persisted_valuation
     )
-
-    assert repo.added_dependencies == (
-        result.valuation.id,
-        request(resolved).dependency_ids,
-    )
-
     assert (
-        repo.verified_id
-        == result.valuation.id
+        repo.persisted_dependencies
+        == req.dependency_ids
     )
-
     assert repo.cutoff == utc(
         2026,
         9,
         28,
     )
+
 
 
 def test_service_rejects_missing_security():
@@ -253,13 +231,14 @@ def test_service_rejects_missing_security():
             request()
         )
 
-    assert repo.added_valuation is None
+    assert repo.persisted_valuation is None
+    assert repo.persisted_dependencies is None
+
 
 
 def test_service_rejects_dependency_set_mismatch():
     resolved = inputs()
     requested = request(resolved)
-
     repo = FakeRepository(
         resolved_inputs=resolved[:-1]
     )
@@ -274,7 +253,9 @@ def test_service_rejects_dependency_set_mismatch():
             requested
         )
 
-    assert repo.added_valuation is None
+    assert repo.persisted_valuation is None
+    assert repo.persisted_dependencies is None
+
 
 
 def test_service_accepts_repository_reordering():
@@ -311,11 +292,11 @@ def test_service_passes_exact_requested_ids_to_repository():
         repo.requested_dependency_ids
         == req.dependency_ids
     )
-
-    assert repo.added_dependencies == (
-        repo.added_valuation.id,
-        req.dependency_ids,
+    assert (
+        repo.persisted_dependencies
+        == req.dependency_ids
     )
+
 
 
 def test_service_rejects_verified_object_mismatch():
@@ -324,29 +305,28 @@ def test_service_rejects_verified_object_mismatch():
         resolved_inputs=resolved
     )
 
-    original_verify = (
-        repo.verify_valuation
-    )
+    original_persist = repo.persist_verified_valuation
 
-    def wrong_verify(
-        valuation_id,
+    def wrong_persist(
+        valuation,
+        dependency_ids,
     ):
-        valuation = original_verify(
-            valuation_id
+        persisted = original_persist(
+            valuation,
+            dependency_ids,
         )
-        return type(valuation)(
-            id=valuation.id,
-            security_id=valuation.security_id,
-            method=valuation.method,
-            value=valuation.value
-            + Decimal("1"),
-            currency=valuation.currency,
-            as_of=valuation.as_of,
-            model_version=valuation.model_version,
-            scenario=valuation.scenario,
+        return type(persisted)(
+            id=persisted.id,
+            security_id=persisted.security_id,
+            method=persisted.method,
+            value=persisted.value + Decimal("1"),
+            currency=persisted.currency,
+            as_of=persisted.as_of,
+            model_version=persisted.model_version,
+            scenario=persisted.scenario,
         )
 
-    repo.verify_valuation = wrong_verify
+    repo.persist_verified_valuation = wrong_persist
 
     with pytest.raises(
         ValuationExecutionServiceError,

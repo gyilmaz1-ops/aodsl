@@ -255,17 +255,9 @@ class ValuationExecutionService:
             inputs=resolved_inputs,
         )
 
-        self.repository.add_valuation(
-            valuation
-        )
-
-        self.repository.add_valuation_dependencies(
-            valuation.id,
+        verified = self.repository.persist_verified_valuation(
+            valuation,
             request.dependency_ids,
-        )
-
-        verified = self.repository.verify_valuation(
-            valuation.id
         )
 
         if verified != valuation:

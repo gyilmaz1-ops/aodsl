@@ -344,3 +344,128 @@ def test_execute_rejects_future_dependency_before_persistence(repo):
         ).fetchone()[0]
 
     assert edge_count == 0
+
+
+
+
+
+
+def test_execute_rolls_back_entire_valuation_when_dependency_insert_fails(repo):
+    """
+    R555B durable atomicity contract.
+
+    Failure is injected by PostgreSQL itself at the Valuation -> DEPENDS_ON
+    persistence boundary. Therefore this test remains valid even if service
+    orchestration is refactored behind a repository aggregate operation.
+    """
+    node_security, dependencies = persist_inputs(
+        repo,
+        seed="execution-db-atomicity-dependency-insert-failure",
+    )
+    dependency_ids = tuple(
+        dependency.id
+        for dependency in dependencies
+    )
+
+    request = ValuationExecutionRequest(
+        security_id=node_security.id,
+        method="DCF",
+        model_version="dcf-v1",
+        scenario="BASE",
+        currency="USD",
+        as_of=utc(2026, 9, 27, 12),
+        research_cutoff=utc(2026, 9, 27, 12),
+        dependency_ids=dependency_ids,
+    )
+
+    trigger_name = "r555b_fail_valuation_dependency_insert"
+    function_name = "r555b_fail_valuation_dependency_insert_fn"
+
+    with repo.connect() as con:
+        with con.transaction():
+            con.execute(
+                f"""
+                CREATE OR REPLACE FUNCTION {function_name}()
+                RETURNS trigger
+                LANGUAGE plpgsql
+                AS $$
+                BEGIN
+                    IF NEW.source_type = 'Valuation'
+                       AND NEW.edge_type = 'DEPENDS_ON'
+                    THEN
+                        RAISE EXCEPTION
+                            'R555B_TEST_DEPENDENCY_INSERT_FAILURE';
+                    END IF;
+
+                    RETURN NEW;
+                END;
+                $$;
+                """
+            )
+
+            con.execute(
+                f"""
+                CREATE TRIGGER {trigger_name}
+                BEFORE INSERT ON domain_edges
+                FOR EACH ROW
+                EXECUTE FUNCTION {function_name}()
+                """
+            )
+
+    try:
+        with pytest.raises(
+            Exception,
+            match="R555B_TEST_DEPENDENCY_INSERT_FAILURE",
+        ):
+            ValuationExecutionService(repo).execute(request)
+
+        # Atomic execution invariant:
+        #
+        # A failure while persisting valuation provenance must roll back
+        # the Valuation node and its projection as well as all dependency
+        # edges. Pre-existing input nodes are intentionally unaffected.
+        assert valuation_count(repo) == 0
+
+        with repo.connect() as con:
+            valuation_node_count = con.execute(
+                """
+                SELECT COUNT(*)
+                FROM domain_nodes
+                WHERE node_type = 'Valuation'
+                """
+            ).fetchone()[0]
+
+            valuation_fact_count = con.execute(
+                """
+                SELECT COUNT(*)
+                FROM valuation_facts
+                """
+            ).fetchone()[0]
+
+            valuation_edge_count = con.execute(
+                """
+                SELECT COUNT(*)
+                FROM domain_edges
+                WHERE source_type = 'Valuation'
+                  AND edge_type = 'DEPENDS_ON'
+                """
+            ).fetchone()[0]
+
+        assert valuation_node_count == 0
+        assert valuation_fact_count == 0
+        assert valuation_edge_count == 0
+
+    finally:
+        with repo.connect() as con:
+            with con.transaction():
+                con.execute(
+                    f"""
+                    DROP TRIGGER IF EXISTS {trigger_name}
+                    ON domain_edges
+                    """
+                )
+                con.execute(
+                    f"""
+                    DROP FUNCTION IF EXISTS {function_name}()
+                    """
+                )

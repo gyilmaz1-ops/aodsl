@@ -146,6 +146,13 @@ class EvidenceRepository(Protocol):
     ) -> Valuation:
         ...
 
+    def persist_verified_valuation(
+        self,
+        valuation: Valuation,
+        dependency_ids: tuple[str, ...],
+    ) -> Valuation:
+        ...
+
     def add_estimate_inputs(
         self,
         estimate_id: str,
