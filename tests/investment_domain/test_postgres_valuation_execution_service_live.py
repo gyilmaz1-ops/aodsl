@@ -551,3 +551,85 @@ def test_persist_verified_valuation_uses_repository_owned_mismatch_error(
 
     assert valuation_node_count == 0
     assert valuation_edge_count == 0
+
+
+def test_execution_exact_replay_is_idempotent(repo):
+    node_security, dependencies = persist_inputs(
+        repo,
+        seed="execution-replay",
+    )
+    dependency_ids = tuple(
+        dependency.id
+        for dependency in dependencies
+    )
+
+    request = ValuationExecutionRequest(
+        security_id=node_security.id,
+        method="DCF",
+        currency="USD",
+        as_of=utc(2026, 9, 27, 12),
+        model_version="dcf-v1",
+        scenario="BASE",
+        research_cutoff=utc(2026, 9, 27, 12),
+        dependency_ids=dependency_ids,
+    )
+
+    service = ValuationExecutionService(repo)
+
+    first = service.execute(request)
+    second = service.execute(request)
+
+    assert second == first
+    assert second.valuation.id == first.valuation.id
+    assert second.dependency_ids == dependency_ids
+
+    with repo.connect() as con:
+        valuation_rows = con.execute(
+            """
+            SELECT COUNT(*)
+            FROM valuation_facts
+            WHERE node_id = %s
+            """,
+            (first.valuation.id,),
+        ).fetchone()[0]
+
+        domain_node_rows = con.execute(
+            """
+            SELECT COUNT(*)
+            FROM domain_nodes
+            WHERE id = %s
+              AND node_type = 'Valuation'
+            """,
+            (first.valuation.id,),
+        ).fetchone()[0]
+
+        dependency_rows = con.execute(
+            """
+            SELECT COUNT(*)
+            FROM domain_edges
+            WHERE source_id = %s
+              AND source_type = 'Valuation'
+              AND edge_type = 'DEPENDS_ON'
+            """,
+            (first.valuation.id,),
+        ).fetchone()[0]
+
+        distinct_dependency_rows = con.execute(
+            """
+            SELECT COUNT(DISTINCT target_id)
+            FROM domain_edges
+            WHERE source_id = %s
+              AND source_type = 'Valuation'
+              AND edge_type = 'DEPENDS_ON'
+            """,
+            (first.valuation.id,),
+        ).fetchone()[0]
+
+    assert valuation_rows == 1
+    assert domain_node_rows == 1
+    assert dependency_rows == len(dependency_ids)
+    assert distinct_dependency_rows == len(dependency_ids)
+
+    assert repo.verify_valuation(
+        first.valuation.id
+    ) == first.valuation
