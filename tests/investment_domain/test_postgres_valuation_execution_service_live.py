@@ -469,3 +469,85 @@ def test_execute_rolls_back_entire_valuation_when_dependency_insert_fails(repo):
                     DROP FUNCTION IF EXISTS {function_name}()
                     """
                 )
+
+def test_persist_verified_valuation_uses_repository_owned_mismatch_error(
+    repo,
+    monkeypatch,
+):
+    """
+    R555C:
+    Aggregate verification mismatch is a repository transaction invariant.
+
+    The PostgreSQL repository must use repository-owned IDM-W547 rather than
+    leaking execution-layer IDM-X014, and the entire aggregate write must
+    roll back.
+    """
+    from investment_domain.postgres_repository import RepositoryWriteError
+
+    node_security, dependencies = persist_inputs(
+        repo,
+        seed="execution-repository-mismatch",
+    )
+
+    dependency_ids = tuple(
+        dependency.id
+        for dependency in dependencies
+    )
+
+    request = ValuationExecutionRequest(
+        security_id=node_security.id,
+        method="DCF",
+        model_version="dcf-v1",
+        scenario="BASE",
+        currency="USD",
+        as_of=utc(2026, 9, 27, 12),
+        research_cutoff=utc(2026, 9, 27, 12),
+        dependency_ids=dependency_ids,
+    )
+
+    original_verify = repo._verify_valuation_in_connection
+
+    def mismatching_verify(con, valuation_id):
+        verified = original_verify(
+            con,
+            valuation_id,
+        )
+        return replace(
+            verified,
+            value=verified.value + Decimal("1"),
+        )
+
+    monkeypatch.setattr(
+        repo,
+        "_verify_valuation_in_connection",
+        mismatching_verify,
+    )
+
+    with pytest.raises(
+        RepositoryWriteError,
+        match="IDM-W547: VERIFIED_VALUATION_MISMATCH",
+    ):
+        ValuationExecutionService(repo).execute(request)
+
+    assert valuation_count(repo) == 0
+
+    with repo.connect() as con:
+        valuation_node_count = con.execute(
+            """
+            SELECT COUNT(*)
+            FROM domain_nodes
+            WHERE node_type = 'Valuation'
+            """
+        ).fetchone()[0]
+
+        valuation_edge_count = con.execute(
+            """
+            SELECT COUNT(*)
+            FROM domain_edges
+            WHERE source_type = 'Valuation'
+              AND edge_type = 'DEPENDS_ON'
+            """
+        ).fetchone()[0]
+
+    assert valuation_node_count == 0
+    assert valuation_edge_count == 0

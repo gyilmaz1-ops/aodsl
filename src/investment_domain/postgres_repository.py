@@ -4452,7 +4452,7 @@ class PostgreSQLEvidenceRepository:
 
                 if verified != valuation:
                     raise RepositoryWriteError(
-                        "IDM-X014: VERIFIED_VALUATION_MISMATCH"
+                        "IDM-W547: VERIFIED_VALUATION_MISMATCH"
                     )
 
                 return verified
