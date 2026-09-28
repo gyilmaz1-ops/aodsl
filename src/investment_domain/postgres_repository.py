@@ -2122,6 +2122,89 @@ class PostgreSQLEvidenceRepository:
 
         return valuation
 
+    def valuation_inputs_by_ids_at(
+        self,
+        dependency_ids: tuple[str, ...],
+        research_cutoff,
+    ) -> tuple:
+        if (
+            not isinstance(dependency_ids, tuple)
+            or not dependency_ids
+        ):
+            raise ValueError(
+                "dependency_ids must be a non-empty tuple"
+            )
+
+        if any(
+            not isinstance(dependency_id, str)
+            or not dependency_id.strip()
+            for dependency_id in dependency_ids
+        ):
+            raise ValueError(
+                "dependency_ids must contain non-empty strings"
+            )
+
+        if len(dependency_ids) != len(set(dependency_ids)):
+            raise ValueError(
+                "dependency_ids must not contain duplicates"
+            )
+
+        if (
+            research_cutoff.tzinfo is None
+            or research_cutoff.utcoffset() is None
+        ):
+            raise ValueError(
+                "research_cutoff must be timezone-aware"
+            )
+
+        resolved = []
+
+        with self.connect() as con:
+            for dependency_id in sorted(dependency_ids):
+                row = con.execute(
+                    """
+                    SELECT node_type
+                    FROM domain_nodes
+                    WHERE id = %s
+                    """,
+                    (dependency_id,),
+                ).fetchone()
+
+                if row is None:
+                    raise RepositoryReadError(
+                        "IDM-R550: "
+                        "VALUATION_INPUT_NOT_VISIBLE_AT_CUTOFF"
+                    )
+
+                target_type = str(row[0])
+
+                if target_type != NodeType.ESTIMATE.value:
+                    raise RepositoryReadError(
+                        "IDM-R550: "
+                        "VALUATION_INPUT_NOT_VISIBLE_AT_CUTOFF"
+                    )
+
+                try:
+                    dependency = self._load_exact_estimate(
+                        con,
+                        dependency_id,
+                    )
+                except RepositoryReadError as exc:
+                    raise RepositoryReadError(
+                        "IDM-R550: "
+                        "VALUATION_INPUT_NOT_VISIBLE_AT_CUTOFF"
+                    ) from exc
+
+                if dependency.as_of > research_cutoff:
+                    raise RepositoryReadError(
+                        "IDM-R550: "
+                        "VALUATION_INPUT_NOT_VISIBLE_AT_CUTOFF"
+                    )
+
+                resolved.append(dependency)
+
+        return tuple(resolved)
+
     def valuation_inputs_at(
         self,
         valuation_id: str,

@@ -130,6 +130,16 @@ class EvidenceRepository(Protocol):
     ]:
         ...
 
+    def valuation_inputs_by_ids_at(
+        self,
+        dependency_ids: tuple[str, ...],
+        research_cutoff: datetime,
+    ) -> tuple[
+        Forecast | Estimate | Metric | Calculation | CatalystImpact,
+        ...,
+    ]:
+        ...
+
     def verify_valuation(
         self,
         valuation_id: str,
