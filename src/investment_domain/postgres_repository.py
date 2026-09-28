@@ -2134,7 +2134,6 @@ class PostgreSQLEvidenceRepository:
             raise ValueError(
                 "dependency_ids must be a non-empty tuple"
             )
-
         if any(
             not isinstance(dependency_id, str)
             or not dependency_id.strip()
@@ -2143,12 +2142,10 @@ class PostgreSQLEvidenceRepository:
             raise ValueError(
                 "dependency_ids must contain non-empty strings"
             )
-
         if len(dependency_ids) != len(set(dependency_ids)):
             raise ValueError(
                 "dependency_ids must not contain duplicates"
             )
-
         if (
             research_cutoff.tzinfo is None
             or research_cutoff.utcoffset() is None
@@ -2157,8 +2154,12 @@ class PostgreSQLEvidenceRepository:
                 "research_cutoff must be timezone-aware"
             )
 
-        resolved = []
+        not_visible = (
+            "IDM-R550: "
+            "VALUATION_INPUT_NOT_VISIBLE_AT_CUTOFF"
+        )
 
+        resolved = []
         with self.connect() as con:
             for dependency_id in sorted(dependency_ids):
                 row = con.execute(
@@ -2171,35 +2172,74 @@ class PostgreSQLEvidenceRepository:
                 ).fetchone()
 
                 if row is None:
-                    raise RepositoryReadError(
-                        "IDM-R550: "
-                        "VALUATION_INPUT_NOT_VISIBLE_AT_CUTOFF"
-                    )
+                    raise RepositoryReadError(not_visible)
 
                 target_type = str(row[0])
 
-                if target_type != NodeType.ESTIMATE.value:
-                    raise RepositoryReadError(
-                        "IDM-R550: "
-                        "VALUATION_INPUT_NOT_VISIBLE_AT_CUTOFF"
-                    )
-
                 try:
-                    dependency = self._load_exact_estimate(
-                        con,
-                        dependency_id,
-                    )
-                except RepositoryReadError as exc:
-                    raise RepositoryReadError(
-                        "IDM-R550: "
-                        "VALUATION_INPUT_NOT_VISIBLE_AT_CUTOFF"
-                    ) from exc
+                    if target_type == NodeType.ESTIMATE.value:
+                        dependency = self._load_exact_estimate(
+                            con,
+                            dependency_id,
+                        )
+                        if (
+                            dependency is None
+                            or dependency.as_of > research_cutoff
+                        ):
+                            raise RepositoryReadError(not_visible)
 
-                if dependency.as_of > research_cutoff:
-                    raise RepositoryReadError(
-                        "IDM-R550: "
-                        "VALUATION_INPUT_NOT_VISIBLE_AT_CUTOFF"
-                    )
+                    elif target_type == NodeType.FORECAST.value:
+                        dependency = self._load_exact_forecast(
+                            con,
+                            dependency_id,
+                        )
+                        if (
+                            dependency is None
+                            or dependency.as_of > research_cutoff
+                        ):
+                            raise RepositoryReadError(not_visible)
+
+                    elif target_type == NodeType.CATALYST_IMPACT.value:
+                        dependency = self._load_exact_catalyst_impact(
+                            con,
+                            dependency_id,
+                        )
+                        if (
+                            dependency is None
+                            or dependency.as_of > research_cutoff
+                        ):
+                            raise RepositoryReadError(not_visible)
+
+                    elif target_type == NodeType.METRIC.value:
+                        dependency = self._load_exact_metric(
+                            con,
+                            dependency_id,
+                        )
+                        if (
+                            dependency is None
+                            or not available_at(
+                                dependency,
+                                research_cutoff,
+                            )
+                        ):
+                            raise RepositoryReadError(not_visible)
+
+                    elif target_type == NodeType.CALCULATION.value:
+                        dependency, visible = self._calculation_visible_at(
+                            con,
+                            dependency_id,
+                            research_cutoff,
+                            set(),
+                        )
+                        if not visible:
+                            raise RepositoryReadError(not_visible)
+                    else:
+                        raise RepositoryReadError(not_visible)
+
+                except RepositoryReadError as exc:
+                    if str(exc) == not_visible:
+                        raise
+                    raise RepositoryReadError(not_visible) from exc
 
                 resolved.append(dependency)
 
