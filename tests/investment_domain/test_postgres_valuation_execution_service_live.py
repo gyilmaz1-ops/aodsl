@@ -8,7 +8,7 @@ from decimal import Decimal, ROUND_HALF_EVEN, localcontext
 import pytest
 
 from investment_domain import canonical_id
-from investment_domain.nodes import CatalystImpact, Estimate, Security
+from investment_domain.nodes import Calculation, CatalystImpact, Estimate, Forecast, Metric, Security
 from investment_domain.postgres_migrations import PostgreSQLMigrationManager
 from investment_domain.postgres_repository import (
     PostgreSQLEvidenceRepository,
@@ -228,6 +228,327 @@ def valuation_dependency_edges(
 
     return tuple(str(row[0]) for row in rows)
 
+
+
+def test_execute_accepts_metric_as_numeric_wacc_dependency(repo):
+    node_security = security(
+        "execution-metric-wacc"
+    )
+
+    dependencies = dcf_dependencies(
+        node_security
+    )
+
+    wacc_estimate = next(
+        dependency
+        for dependency in dependencies
+        if dependency.metric_name == "valuation.wacc"
+    )
+
+    numeric_estimates = tuple(
+        dependency
+        for dependency in dependencies
+        if dependency.id != wacc_estimate.id
+    )
+
+    metric_payload = {
+        "subject_id": node_security.company_id,
+        "name": "valuation.wacc",
+        "value": Decimal("0.10"),
+        "unit": "ratio",
+        "period_start": None,
+        "period_end": utc(2026, 9, 27),
+        "effective_at": utc(2026, 9, 27, 9),
+        "observed_at": utc(2026, 9, 27, 9),
+        "published_at": utc(2026, 9, 27, 9),
+        "source_id": "source:execution-metric-wacc",
+        "source_version": "1",
+    }
+
+    metric_identity = {
+        key: metric_payload[key]
+        for key in (
+            "subject_id",
+            "name",
+            "period_start",
+            "period_end",
+            "effective_at",
+            "observed_at",
+            "published_at",
+            "source_id",
+            "source_version",
+        )
+    }
+
+    wacc_metric = Metric(
+        id=canonical_id(
+            "metric",
+            metric_identity,
+        ),
+        **metric_payload,
+        currency=None,
+        ingested_at=utc(2026, 9, 27, 9),
+        supersedes_id=None,
+    )
+
+    repo.add_security(node_security)
+
+    for dependency in numeric_estimates:
+        repo.add_estimate(dependency)
+
+    repo.add_metric(wacc_metric)
+
+    dependency_ids = (
+        *(dependency.id for dependency in numeric_estimates),
+        wacc_metric.id,
+    )
+
+    request = ValuationExecutionRequest(
+        security_id=node_security.id,
+        method="DCF",
+        currency="USD",
+        as_of=utc(2026, 9, 27, 12),
+        model_version="dcf-v1",
+        scenario="BASE",
+        research_cutoff=utc(2026, 9, 27, 12),
+        dependency_ids=dependency_ids,
+    )
+
+    service = ValuationExecutionService(repo)
+
+    result = service.execute(request)
+
+    assert result.valuation.value == expected_dcf_value()
+    assert result.dependency_ids == dependency_ids
+    assert valuation_count(repo) == 1
+
+    assert valuation_dependency_edges(
+        repo,
+        result.valuation.id,
+    ) == tuple(sorted(dependency_ids))
+
+    with repo.connect() as con:
+        metric_edge = con.execute(
+            """
+            SELECT
+                target_id,
+                target_type
+            FROM domain_edges
+            WHERE source_id = %s
+              AND source_type = 'Valuation'
+              AND edge_type = 'DEPENDS_ON'
+              AND target_id = %s
+            """,
+            (
+                result.valuation.id,
+                wacc_metric.id,
+            ),
+        ).fetchone()
+
+        estimate_wacc_edge_count = con.execute(
+            """
+            SELECT COUNT(*)
+            FROM domain_edges
+            WHERE source_id = %s
+              AND source_type = 'Valuation'
+              AND edge_type = 'DEPENDS_ON'
+              AND target_id = %s
+            """,
+            (
+                result.valuation.id,
+                wacc_estimate.id,
+            ),
+        ).fetchone()[0]
+
+    assert metric_edge == (
+        wacc_metric.id,
+        "Metric",
+    )
+    assert estimate_wacc_edge_count == 0
+
+    verified = repo.verify_valuation(
+        result.valuation.id
+    )
+
+    assert verified == result.valuation
+
+
+def test_execute_preserves_forecast_and_calculation_as_provenance_dependencies(
+    repo,
+):
+    node_security = security(
+        "execution-forecast-calculation-provenance"
+    )
+
+    numeric_dependencies = dcf_dependencies(
+        node_security
+    )
+
+    repo.add_security(node_security)
+
+    for dependency in numeric_dependencies:
+        repo.add_estimate(dependency)
+
+    forecast_payload = {
+        "subject_id": node_security.id,
+        "scenario": "BASE",
+        "as_of": utc(2026, 9, 27, 10),
+        "model_version": "forecast-provenance-v1",
+    }
+
+    node_forecast = Forecast(
+        id=canonical_id(
+            "forecast",
+            forecast_payload,
+        ),
+        **forecast_payload,
+    )
+
+    calculation_metric_identity = {
+        "subject_id": node_security.company_id,
+        "name": "valuation.wacc",
+        "period_start": None,
+        "period_end": utc(2026, 9, 27),
+        "effective_at": utc(2026, 9, 27, 9),
+        "observed_at": utc(2026, 9, 27, 9),
+        "published_at": utc(2026, 9, 27, 9),
+        "source_id": "source:execution-calculation-provenance",
+        "source_version": "1",
+    }
+
+    calculation_metric = Metric(
+        id=canonical_id(
+            "metric",
+            calculation_metric_identity,
+        ),
+        value=Decimal("0.10"),
+        unit="ratio",
+        currency=None,
+        ingested_at=utc(2026, 9, 27, 9),
+        supersedes_id=None,
+        **calculation_metric_identity,
+    )
+
+    calculation_payload = {
+        "subject_id": node_security.company_id,
+        "formula": "REF(0)",
+        "input_ids": (
+            calculation_metric.id,
+        ),
+        "value": calculation_metric.value,
+        "unit": calculation_metric.unit,
+        "currency": calculation_metric.currency,
+        "model_version": "cel-v1",
+    }
+
+    calculation_identity = {
+        key: calculation_payload[key]
+        for key in (
+            "subject_id",
+            "formula",
+            "input_ids",
+            "model_version",
+        )
+    }
+
+    node_calculation = Calculation(
+        id=canonical_id(
+            "calculation",
+            calculation_identity,
+        ),
+        **calculation_payload,
+    )
+
+    repo.add_forecast(node_forecast)
+    repo.add_metric(calculation_metric)
+    repo.add_calculation(node_calculation)
+    repo.add_calculation_inputs(node_calculation.id)
+
+    with repo.connect() as con:
+        with con.transaction():
+            con.execute(
+                """
+                UPDATE domain_edges
+                SET created_at = %s
+                WHERE source_id = %s
+                  AND source_type = 'Calculation'
+                  AND edge_type = 'DERIVED_FROM'
+                  AND target_id = %s
+                """,
+                (
+                    utc(2026, 9, 27, 11),
+                    node_calculation.id,
+                    calculation_metric.id,
+                ),
+            )
+
+    dependency_ids = (
+        *(dependency.id for dependency in numeric_dependencies),
+        node_forecast.id,
+        node_calculation.id,
+    )
+
+    request = ValuationExecutionRequest(
+        security_id=node_security.id,
+        method="DCF",
+        currency="USD",
+        as_of=utc(2026, 9, 27, 12),
+        model_version="dcf-v1",
+        scenario="BASE",
+        research_cutoff=utc(2026, 9, 27, 12),
+        dependency_ids=dependency_ids,
+    )
+
+    service = ValuationExecutionService(repo)
+
+    result = service.execute(request)
+
+    assert result.valuation.value == expected_dcf_value()
+    assert result.dependency_ids == dependency_ids
+    assert valuation_count(repo) == 1
+
+    assert valuation_dependency_edges(
+        repo,
+        result.valuation.id,
+    ) == tuple(sorted(dependency_ids))
+
+    with repo.connect() as con:
+        provenance_edges = con.execute(
+            """
+            SELECT
+                target_id,
+                target_type
+            FROM domain_edges
+            WHERE source_id = %s
+              AND source_type = 'Valuation'
+              AND edge_type = 'DEPENDS_ON'
+              AND target_id IN (%s, %s)
+            ORDER BY target_id
+            """,
+            (
+                result.valuation.id,
+                node_forecast.id,
+                node_calculation.id,
+            ),
+        ).fetchall()
+
+    assert tuple(
+        (str(row[0]), str(row[1]))
+        for row in provenance_edges
+    ) == tuple(
+        sorted(
+            (
+                (node_forecast.id, "Forecast"),
+                (node_calculation.id, "Calculation"),
+            )
+        )
+    )
+
+    verified = repo.verify_valuation(
+        result.valuation.id
+    )
+
+    assert verified == result.valuation
 
 def test_execute_persists_and_exactly_verifies_live_dcf(repo):
     node_security, dependencies = persist_inputs(
