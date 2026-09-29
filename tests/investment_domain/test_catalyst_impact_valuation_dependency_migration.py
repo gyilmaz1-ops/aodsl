@@ -16,8 +16,13 @@ def _sql(migration):
     return "\n".join(migration.statements)
 
 
-def test_v18_is_current_schema_version():
-    assert CURRENT_SCHEMA_VERSION == 18
+def test_v18_migration_remains_registered():
+    migration = next(
+        migration for migration in MIGRATIONS
+        if migration.version == 18
+    )
+
+    assert migration.version == 18
 
 
 def test_v18_is_registered_once():

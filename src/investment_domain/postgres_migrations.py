@@ -1031,6 +1031,31 @@ ALTER TABLE domain_edges
 )
 
 
+
+RECOMMENDATION_FACTS = Migration(
+    version=19,
+    name="add_recommendation_facts",
+    statements=(
+        """
+CREATE TABLE recommendation_facts (
+    node_id TEXT PRIMARY KEY,
+    node_type TEXT NOT NULL DEFAULT 'Recommendation',
+    security_id TEXT NOT NULL,
+    action TEXT NOT NULL,
+    as_of TIMESTAMPTZ NOT NULL,
+    created_by TEXT NOT NULL,
+    rationale_claim_ids TEXT[] NOT NULL,
+    CONSTRAINT recommendation_node_type
+        CHECK (node_type = 'Recommendation'),
+    CONSTRAINT recommendation_domain_node_fk
+        FOREIGN KEY (node_id, node_type)
+        REFERENCES domain_nodes(id, node_type)
+        ON DELETE RESTRICT
+)
+""".strip(),
+    ),
+)
+
 MIGRATIONS = (
     INITIAL_SCHEMA,
     EDGE_CREATED_AT,
@@ -1050,6 +1075,7 @@ MIGRATIONS = (
     CATALYST_AFFECTS_EDGES,
     CATALYST_IMPACT_FACTS,
     EXTEND_VALUATION_DEPENDENCIES_WITH_CATALYST_IMPACT,
+    RECOMMENDATION_FACTS,
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 

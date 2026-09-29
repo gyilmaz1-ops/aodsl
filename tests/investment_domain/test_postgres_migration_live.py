@@ -29,6 +29,7 @@ from investment_domain.postgres_migrations import (
     METRIC_REVISION_CONSTRAINTS,
     Migration,
     MigrationError,
+    RECOMMENDATION_FACTS,
     PostgreSQLMigrationManager,
     advisory_lock_key,
 )
@@ -52,6 +53,7 @@ def reset_database():
     with connect() as con:
         with con.transaction():
             con.execute("DROP TABLE IF EXISTS domain_edges CASCADE")
+            con.execute("DROP TABLE IF EXISTS recommendation_facts CASCADE")
             con.execute("DROP TABLE IF EXISTS catalyst_impact_facts CASCADE")
             con.execute("DROP TABLE IF EXISTS catalyst_facts CASCADE")
             con.execute("DROP TABLE IF EXISTS forecast_facts CASCADE")
@@ -200,6 +202,11 @@ def test_live_initial_migration_and_idempotent_restart():
                 18,
                 EXTEND_VALUATION_DEPENDENCIES_WITH_CATALYST_IMPACT.name,
                 EXTEND_VALUATION_DEPENDENCIES_WITH_CATALYST_IMPACT.checksum,
+            ),
+            (
+                19,
+                RECOMMENDATION_FACTS.name,
+                RECOMMENDATION_FACTS.checksum,
             ),
         ]
 
