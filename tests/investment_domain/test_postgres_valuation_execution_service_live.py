@@ -8,7 +8,7 @@ from decimal import Decimal, ROUND_HALF_EVEN, localcontext
 import pytest
 
 from investment_domain import canonical_id
-from investment_domain.nodes import Estimate, Security
+from investment_domain.nodes import CatalystImpact, Estimate, Security
 from investment_domain.postgres_migrations import PostgreSQLMigrationManager
 from investment_domain.postgres_repository import (
     PostgreSQLEvidenceRepository,
@@ -272,6 +272,97 @@ def test_execute_persists_and_exactly_verifies_live_dcf(repo):
         result.valuation.id
     ) == result.valuation
 
+
+
+def test_execute_preserves_catalyst_impact_as_provenance_dependency(repo):
+    node_security, dependencies = persist_inputs(
+        repo,
+        seed="execution-catalyst-provenance",
+    )
+
+    payload = {
+        "catalyst_id": canonical_id(
+            "catalyst",
+            {"seed": "execution-catalyst-provenance"},
+        ),
+        "target_id": canonical_id(
+            "claim",
+            {"seed": "execution-catalyst-provenance"},
+        ),
+        "direction": "POSITIVE",
+        "magnitude": "HIGH",
+        "probability": Decimal("0.75"),
+        "confidence": Decimal("0.80"),
+        "horizon": "NEAR_TERM",
+        "rationale": (
+            "Valuation execution provenance "
+            "execution-catalyst-provenance"
+        ),
+        "as_of": utc(2026, 9, 27, 10),
+        "created_by": "test-agent",
+    }
+    impact = CatalystImpact(
+        id=canonical_id(
+            "catalyst_impact",
+            payload,
+        ),
+        **payload,
+    )
+    repo.add_catalyst_impact(impact)
+
+    numeric_dependency_ids = tuple(
+        dependency.id
+        for dependency in dependencies
+    )
+    dependency_ids = (
+        *numeric_dependency_ids,
+        impact.id,
+    )
+
+    request = ValuationExecutionRequest(
+        security_id=node_security.id,
+        method="DCF",
+        model_version="dcf-v1",
+        scenario="BASE",
+        currency="USD",
+        as_of=utc(2026, 9, 27, 12),
+        research_cutoff=utc(2026, 9, 27, 12),
+        dependency_ids=dependency_ids,
+    )
+
+    result = ValuationExecutionService(repo).execute(request)
+
+    assert result.valuation.value == expected_dcf_value()
+    assert result.dependency_ids == dependency_ids
+
+    assert valuation_count(repo) == 1
+
+    assert valuation_dependency_edges(
+        repo,
+        result.valuation.id,
+    ) == tuple(sorted(dependency_ids))
+
+    with repo.connect() as con:
+        impact_edge = con.execute(
+            """
+            SELECT target_type
+            FROM domain_edges
+            WHERE source_id = %s
+              AND source_type = 'Valuation'
+              AND edge_type = 'DEPENDS_ON'
+              AND target_id = %s
+            """,
+            (
+                result.valuation.id,
+                impact.id,
+            ),
+        ).fetchone()
+
+    assert impact_edge == ("CatalystImpact",)
+
+    assert repo.verify_valuation(
+        result.valuation.id
+    ) == result.valuation
 
 def test_execute_rejects_future_dependency_before_persistence(repo):
     node_security, dependencies = persist_inputs(
@@ -560,6 +651,191 @@ def test_persist_verified_valuation_uses_repository_owned_mismatch_error(
     assert valuation_fact_count == 0
     assert valuation_edge_count == 0
 
+
+
+def test_execution_catalyst_provenance_exact_replay_is_idempotent(repo):
+    node_security, dependencies = persist_inputs(
+        repo,
+        seed="execution-catalyst-exact-replay",
+    )
+
+    payload = {
+        "catalyst_id": canonical_id(
+            "catalyst",
+            {"seed": "execution-catalyst-exact-replay"},
+        ),
+        "target_id": canonical_id(
+            "claim",
+            {"seed": "execution-catalyst-exact-replay"},
+        ),
+        "direction": "POSITIVE",
+        "magnitude": "HIGH",
+        "probability": Decimal("0.75"),
+        "confidence": Decimal("0.80"),
+        "horizon": "NEAR_TERM",
+        "rationale": "Catalyst provenance exact replay",
+        "as_of": utc(2026, 9, 27, 10),
+        "created_by": "test-agent",
+    }
+    impact = CatalystImpact(
+        id=canonical_id("catalyst_impact", payload),
+        **payload,
+    )
+    repo.add_catalyst_impact(impact)
+
+    dependency_ids = (
+        *(dependency.id for dependency in dependencies),
+        impact.id,
+    )
+
+    request = ValuationExecutionRequest(
+        security_id=node_security.id,
+        method="DCF",
+        currency="USD",
+        as_of=utc(2026, 9, 27, 12),
+        model_version="dcf-v1",
+        scenario="BASE",
+        research_cutoff=utc(2026, 9, 27, 12),
+        dependency_ids=dependency_ids,
+    )
+
+    service = ValuationExecutionService(repo)
+
+    first = service.execute(request)
+    second = service.execute(request)
+
+    assert second == first
+    assert first.valuation.value == expected_dcf_value()
+    assert second.dependency_ids == dependency_ids
+    assert valuation_count(repo) == 1
+
+    assert valuation_dependency_edges(
+        repo,
+        first.valuation.id,
+    ) == tuple(sorted(dependency_ids))
+
+    assert repo.verify_valuation(
+        first.valuation.id
+    ) == first.valuation
+
+
+def test_execution_catalyst_provenance_concurrent_replay_is_idempotent(repo):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    node_security, dependencies = persist_inputs(
+        repo,
+        seed="execution-catalyst-concurrent-replay",
+    )
+
+    payload = {
+        "catalyst_id": canonical_id(
+            "catalyst",
+            {"seed": "execution-catalyst-concurrent-replay"},
+        ),
+        "target_id": canonical_id(
+            "claim",
+            {"seed": "execution-catalyst-concurrent-replay"},
+        ),
+        "direction": "POSITIVE",
+        "magnitude": "HIGH",
+        "probability": Decimal("0.75"),
+        "confidence": Decimal("0.80"),
+        "horizon": "NEAR_TERM",
+        "rationale": "Catalyst provenance concurrent replay",
+        "as_of": utc(2026, 9, 27, 10),
+        "created_by": "test-agent",
+    }
+    impact = CatalystImpact(
+        id=canonical_id("catalyst_impact", payload),
+        **payload,
+    )
+    repo.add_catalyst_impact(impact)
+
+    dependency_ids = (
+        *(dependency.id for dependency in dependencies),
+        impact.id,
+    )
+
+    request = ValuationExecutionRequest(
+        security_id=node_security.id,
+        method="DCF",
+        currency="USD",
+        as_of=utc(2026, 9, 27, 12),
+        model_version="dcf-v1",
+        scenario="BASE",
+        research_cutoff=utc(2026, 9, 27, 12),
+        dependency_ids=dependency_ids,
+    )
+
+    barrier = Barrier(2)
+
+    def execute_once():
+        service = ValuationExecutionService(repo)
+        barrier.wait(timeout=10)
+        return service.execute(request)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = tuple(
+            pool.submit(execute_once)
+            for _ in range(2)
+        )
+        first, second = tuple(
+            future.result(timeout=30)
+            for future in futures
+        )
+
+    assert second == first
+    assert first.valuation.value == expected_dcf_value()
+    assert first.dependency_ids == dependency_ids
+    assert second.dependency_ids == dependency_ids
+    assert valuation_count(repo) == 1
+
+    with repo.connect() as con:
+        valuation_node_count = con.execute(
+            """
+            SELECT COUNT(*)
+            FROM domain_nodes
+            WHERE id = %s
+              AND node_type = 'Valuation'
+            """,
+            (first.valuation.id,),
+        ).fetchone()[0]
+
+        dependency_count = con.execute(
+            """
+            SELECT COUNT(*)
+            FROM domain_edges
+            WHERE source_id = %s
+              AND source_type = 'Valuation'
+              AND edge_type = 'DEPENDS_ON'
+            """,
+            (first.valuation.id,),
+        ).fetchone()[0]
+
+        distinct_dependency_count = con.execute(
+            """
+            SELECT COUNT(DISTINCT target_id)
+            FROM domain_edges
+            WHERE source_id = %s
+              AND source_type = 'Valuation'
+              AND edge_type = 'DEPENDS_ON'
+            """,
+            (first.valuation.id,),
+        ).fetchone()[0]
+
+    assert valuation_node_count == 1
+    assert dependency_count == len(dependency_ids)
+    assert distinct_dependency_count == len(dependency_ids)
+
+    assert valuation_dependency_edges(
+        repo,
+        first.valuation.id,
+    ) == tuple(sorted(dependency_ids))
+
+    assert repo.verify_valuation(
+        first.valuation.id
+    ) == first.valuation
 
 def test_execution_exact_replay_is_idempotent(repo):
     node_security, dependencies = persist_inputs(
