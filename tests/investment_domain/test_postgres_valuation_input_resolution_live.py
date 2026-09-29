@@ -529,3 +529,103 @@ def test_future_valuation_dependency_edge_fails_closed(repo):
             node_valuation.id,
             cutoff,
         )
+
+
+def test_valuation_inputs_at_rejects_calculation_with_future_transitive_provenance(
+    repo,
+):
+    node_valuation = valuation(
+        "future-transitive-calculation-provenance"
+    )
+    cutoff = utc(2026, 9, 27, 12)
+
+    leaf_metric = metric(
+        "future-transitive-calculation-provenance"
+    )
+
+    child_calculation = calculation(
+        leaf_metric.id,
+        seed="future-transitive-child",
+    )
+
+    parent_calculation = calculation(
+        child_calculation.id,
+        seed="future-transitive-parent",
+    )
+
+    repo.add_metric(leaf_metric)
+
+    repo.add_calculation(child_calculation)
+    repo.add_calculation_inputs(child_calculation.id)
+
+    repo.add_calculation(parent_calculation)
+    repo.add_calculation_inputs(parent_calculation.id)
+
+    repo.add_valuation(node_valuation)
+    repo.add_valuation_dependencies(
+        node_valuation.id,
+        (parent_calculation.id,),
+    )
+
+    pin_valuation_dependency_edges_before_cutoff(
+        repo,
+        node_valuation.id,
+    )
+
+    # Normalize the complete Calculation provenance chain before
+    # the PIT cutoff so the test has exactly one future condition.
+    with repo.connect() as con:
+        with con.transaction():
+            normalized = con.execute(
+                """
+                UPDATE domain_edges
+                SET created_at = %s
+                WHERE source_id = ANY(%s)
+                  AND source_type = 'Calculation'
+                  AND edge_type = 'DERIVED_FROM'
+                RETURNING source_id, target_id
+                """,
+                (
+                    utc(2026, 9, 27, 11),
+                    [
+                        child_calculation.id,
+                        parent_calculation.id,
+                    ],
+                ),
+            ).fetchall()
+
+            assert set(normalized) == {
+                (child_calculation.id, leaf_metric.id),
+                (parent_calculation.id, child_calculation.id),
+            }
+
+            future_edge = con.execute(
+                """
+                UPDATE domain_edges
+                SET created_at = %s
+                WHERE source_id = %s
+                  AND source_type = 'Calculation'
+                  AND edge_type = 'DERIVED_FROM'
+                  AND target_id = %s
+                  AND target_type = 'Metric'
+                RETURNING source_id, target_id
+                """,
+                (
+                    utc(2026, 9, 27, 13),
+                    child_calculation.id,
+                    leaf_metric.id,
+                ),
+            ).fetchall()
+
+            assert future_edge == [
+                (child_calculation.id, leaf_metric.id)
+            ]
+
+    with pytest.raises(
+        RepositoryReadError,
+        match="IDM-R550: VALUATION_INPUT_NOT_VISIBLE_AT_CUTOFF",
+    ):
+        repo.valuation_inputs_at(
+            node_valuation.id,
+            cutoff,
+        )
