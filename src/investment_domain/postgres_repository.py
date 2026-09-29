@@ -872,7 +872,7 @@ class PostgreSQLEvidenceRepository:
 
         if row is None:
             raise RepositoryWriteError(
-                "IDM-W544: CATALYST_IMPACT_PROJECTION_WRITE_LOST"
+                "IDM-W548: CATALYST_IMPACT_PROJECTION_WRITE_LOST"
             )
 
         expected = (
@@ -1022,7 +1022,7 @@ class PostgreSQLEvidenceRepository:
 
                 if node_exists and not projection_exists:
                     raise RepositoryWriteError(
-                        "IDM-W544: "
+                        "IDM-W548: "
                         "CATALYST_IMPACT_PROJECTION_WRITE_LOST"
                     )
 
@@ -1094,7 +1094,7 @@ class PostgreSQLEvidenceRepository:
 
                 if result.rowcount != 1:
                     raise RepositoryWriteError(
-                        "IDM-W544: "
+                        "IDM-W548: "
                         "CATALYST_IMPACT_PROJECTION_WRITE_LOST"
                     )
 
