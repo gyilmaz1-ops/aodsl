@@ -1750,29 +1750,25 @@ class PostgreSQLEvidenceRepository:
         validate_node(valuation)
         payload, payload_hash = self._payload(valuation)
 
-        node_exists = (
-            con.execute(
-                """
-                SELECT 1
-                FROM domain_nodes
-                WHERE id = %s
-                """,
-                (valuation.id,),
-            ).fetchone()
-            is not None
-        )
-
-        projection_exists = (
-            con.execute(
-                """
-                SELECT 1
-                FROM valuation_facts
-                WHERE node_id = %s
-                """,
-                (valuation.id,),
-            ).fetchone()
-            is not None
-        )
+        node_exists, projection_exists = con.execute(
+            """
+            SELECT
+                EXISTS (
+                    SELECT 1
+                    FROM domain_nodes
+                    WHERE id = %s
+                ),
+                EXISTS (
+                    SELECT 1
+                    FROM valuation_facts
+                    WHERE node_id = %s
+                )
+            """,
+            (
+                valuation.id,
+                valuation.id,
+            ),
+        ).fetchone()
 
         if node_exists and not projection_exists:
             raise RepositoryWriteError(

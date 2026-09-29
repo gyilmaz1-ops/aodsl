@@ -475,3 +475,82 @@ def test_orphan_valuation_projection_fails_closed(repo):
                     ON DELETE RESTRICT
                     """
                 )
+
+
+
+def test_valuation_precheck_uses_single_statement_snapshot():
+    """
+    R559.4E regression contract.
+
+    The valuation node/projection existence observation must be
+    performed by one SQL statement.
+
+    Under READ COMMITTED, separate statements may observe different
+    committed snapshots and can therefore manufacture a transient
+    node-absent / projection-present state during exact concurrent
+    replay.
+
+    One statement containing both EXISTS predicates prevents that
+    split-snapshot classification while preserving the W532/W534
+    integrity guards.
+    """
+    from pathlib import Path
+
+    source = Path(
+        "src/investment_domain/postgres_repository.py"
+    ).read_text()
+
+    method_start = source.index(
+        "    def _add_valuation_in_transaction("
+    )
+
+    next_method = source.find(
+        "\n    def ",
+        method_start + 5,
+    )
+
+    if next_method == -1:
+        block = source[method_start:]
+    else:
+        block = source[method_start:next_method]
+
+    assert (
+        "node_exists, projection_exists = con.execute("
+        in block
+    )
+
+    assert block.count("FROM domain_nodes") >= 1
+    assert block.count("FROM valuation_facts") >= 1
+
+    # Both observations must live inside the same SELECT statement.
+    assignment_start = block.index(
+        "node_exists, projection_exists = con.execute("
+    )
+
+    assignment_end = block.index(
+        ").fetchone()",
+        assignment_start,
+    )
+
+    observation = block[
+        assignment_start:
+        assignment_end
+    ]
+
+    assert observation.count("EXISTS (") == 2
+    assert "FROM domain_nodes" in observation
+    assert "FROM valuation_facts" in observation
+
+    # The obsolete split-statement probes must not return.
+    assert "node_exists = (" not in block
+    assert "projection_exists = (" not in block
+
+    # Integrity semantics remain fail-closed.
+    assert (
+        "IDM-W532: VALUATION_PROJECTION_WRITE_LOST"
+        in block
+    )
+    assert (
+        "IDM-W534: VALUATION_ORPHAN_PROJECTION"
+        in block
+    )
