@@ -685,6 +685,134 @@ def test_execute_preserves_catalyst_impact_as_provenance_dependency(repo):
         result.valuation.id
     ) == result.valuation
 
+
+def test_execute_rejects_calculation_with_future_transitive_provenance_before_persistence(
+    repo,
+):
+    node_security = security(
+        "execution-calculation-future-transitive-provenance"
+    )
+    numeric_dependencies = dcf_dependencies(
+        node_security
+    )
+
+    repo.add_security(node_security)
+    for dependency in numeric_dependencies:
+        repo.add_estimate(dependency)
+
+    calculation_metric_identity = {
+        "subject_id": node_security.company_id,
+        "name": "valuation.wacc",
+        "period_start": None,
+        "period_end": utc(2026, 9, 27),
+        "effective_at": utc(2026, 9, 27, 9),
+        "observed_at": utc(2026, 9, 27, 9),
+        "published_at": utc(2026, 9, 27, 9),
+        "source_id": "source:execution-calculation-future-transitive",
+        "source_version": "1",
+    }
+    calculation_metric = Metric(
+        id=canonical_id(
+            "metric",
+            calculation_metric_identity,
+        ),
+        value=Decimal("0.10"),
+        unit="ratio",
+        currency=None,
+        ingested_at=utc(2026, 9, 27, 9),
+        supersedes_id=None,
+        **calculation_metric_identity,
+    )
+
+    calculation_payload = {
+        "subject_id": node_security.company_id,
+        "formula": "REF(0)",
+        "input_ids": (
+            calculation_metric.id,
+        ),
+        "value": calculation_metric.value,
+        "unit": calculation_metric.unit,
+        "currency": calculation_metric.currency,
+        "model_version": "cel-v1",
+    }
+    calculation_identity = {
+        key: calculation_payload[key]
+        for key in (
+            "subject_id",
+            "formula",
+            "input_ids",
+            "model_version",
+        )
+    }
+    node_calculation = Calculation(
+        id=canonical_id(
+            "calculation",
+            calculation_identity,
+        ),
+        **calculation_payload,
+    )
+
+    repo.add_metric(calculation_metric)
+    repo.add_calculation(node_calculation)
+    repo.add_calculation_inputs(node_calculation.id)
+
+    # The Calculation exists, and its Metric is itself PIT-visible.
+    # Only the transitive provenance edge is from the future.
+    with repo.connect() as con:
+        with con.transaction():
+            con.execute(
+                """
+                UPDATE domain_edges
+                SET created_at = %s
+                WHERE source_id = %s
+                  AND source_type = 'Calculation'
+                  AND edge_type = 'DERIVED_FROM'
+                  AND target_id = %s
+                  AND target_type = 'Metric'
+                """,
+                (
+                    utc(2026, 9, 27, 13),
+                    node_calculation.id,
+                    calculation_metric.id,
+                ),
+            )
+
+    dependency_ids = (
+        *(dependency.id for dependency in numeric_dependencies),
+        node_calculation.id,
+    )
+
+    request = ValuationExecutionRequest(
+        security_id=node_security.id,
+        method="DCF",
+        currency="USD",
+        as_of=utc(2026, 9, 27, 12),
+        model_version="dcf-v1",
+        scenario="BASE",
+        research_cutoff=utc(2026, 9, 27, 12),
+        dependency_ids=dependency_ids,
+    )
+
+    with pytest.raises(
+        RepositoryReadError,
+        match="IDM-R550: VALUATION_INPUT_NOT_VISIBLE_AT_CUTOFF",
+    ):
+        ValuationExecutionService(repo).execute(request)
+
+    assert valuation_count(repo) == 0
+
+    with repo.connect() as con:
+        edge_count = con.execute(
+            """
+            SELECT COUNT(*)
+            FROM domain_edges
+            WHERE source_type = 'Valuation'
+              AND edge_type = 'DEPENDS_ON'
+            """
+        ).fetchone()[0]
+
+    assert edge_count == 0
+
 def test_execute_rejects_future_dependency_before_persistence(repo):
     node_security, dependencies = persist_inputs(
         repo,
