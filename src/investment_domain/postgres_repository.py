@@ -28,6 +28,7 @@ from .nodes import (
     Evidence,
     Forecast,
     Metric,
+    Recommendation,
     Security,
     Valuation,
 )
@@ -683,6 +684,53 @@ class PostgreSQLEvidenceRepository:
         if actual != expected:
             raise RepositoryWriteError(
                 "IDM-W533: VALUATION_PROJECTION_MISMATCH"
+            )
+
+    @staticmethod
+    def _assert_recommendation_projection_matches(
+        con,
+        recommendation: Recommendation,
+    ) -> None:
+        row = con.execute(
+            """
+            SELECT
+                node_type,
+                security_id,
+                action,
+                as_of,
+                created_by,
+                rationale_claim_ids
+            FROM recommendation_facts
+            WHERE node_id = %s
+            """,
+            (recommendation.id,),
+        ).fetchone()
+
+        if row is None:
+            raise RepositoryWriteError(
+                "IDM-W549: RECOMMENDATION_PROJECTION_WRITE_LOST"
+            )
+
+        actual = (
+            str(row[0]),
+            str(row[1]),
+            str(row[2]),
+            row[3],
+            str(row[4]),
+            tuple(row[5]),
+        )
+        expected = (
+            recommendation.node_type.value,
+            recommendation.security_id,
+            recommendation.action,
+            recommendation.as_of,
+            recommendation.created_by,
+            recommendation.rationale_claim_ids,
+        )
+
+        if actual != expected:
+            raise RepositoryWriteError(
+                "IDM-W550: RECOMMENDATION_PROJECTION_MISMATCH"
             )
 
     @staticmethod
@@ -1729,6 +1777,98 @@ class PostgreSQLEvidenceRepository:
                     raise RepositoryWriteError(
                         "IDM-W539: "
                         "FORECAST_COMPOSITION_SET_MISMATCH"
+                    )
+
+    def add_recommendation(
+        self,
+        recommendation: Recommendation,
+    ) -> None:
+        validate_node(recommendation)
+        payload, payload_hash = self._payload(recommendation)
+
+        with self.connect() as con:
+            with con.transaction():
+                node_exists, projection_exists = con.execute(
+                    """
+                    SELECT
+                        EXISTS (
+                            SELECT 1
+                            FROM domain_nodes
+                            WHERE id = %s
+                        ),
+                        EXISTS (
+                            SELECT 1
+                            FROM recommendation_facts
+                            WHERE node_id = %s
+                        )
+                    """,
+                    (
+                        recommendation.id,
+                        recommendation.id,
+                    ),
+                ).fetchone()
+
+                if node_exists and not projection_exists:
+                    raise RepositoryWriteError(
+                        "IDM-W549: RECOMMENDATION_PROJECTION_WRITE_LOST"
+                    )
+
+                if projection_exists and not node_exists:
+                    raise RepositoryWriteError(
+                        "IDM-W551: RECOMMENDATION_ORPHAN_PROJECTION"
+                    )
+
+                if node_exists:
+                    self._assert_existing_node_matches(
+                        con,
+                        node_id=recommendation.id,
+                        node_type=recommendation.node_type.value,
+                        payload=payload,
+                        payload_hash=payload_hash,
+                    )
+                    self._assert_recommendation_projection_matches(
+                        con,
+                        recommendation,
+                    )
+                    return
+
+                self._insert_domain_node(
+                    con,
+                    node_id=recommendation.id,
+                    node_type=recommendation.node_type.value,
+                    payload=payload,
+                    payload_hash=payload_hash,
+                )
+
+                result = con.execute(
+                    """
+                    INSERT INTO recommendation_facts (
+                        node_id,
+                        node_type,
+                        security_id,
+                        action,
+                        as_of,
+                        created_by,
+                        rationale_claim_ids
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (node_id) DO NOTHING
+                    """,
+                    (
+                        recommendation.id,
+                        recommendation.node_type.value,
+                        recommendation.security_id,
+                        recommendation.action,
+                        recommendation.as_of,
+                        recommendation.created_by,
+                        list(recommendation.rationale_claim_ids),
+                    ),
+                )
+
+                if result.rowcount != 1:
+                    self._assert_recommendation_projection_matches(
+                        con,
+                        recommendation,
                     )
 
     def add_valuation(
