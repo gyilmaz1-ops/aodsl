@@ -633,3 +633,103 @@ def test_execution_exact_replay_is_idempotent(repo):
     assert repo.verify_valuation(
         first.valuation.id
     ) == first.valuation
+
+
+def test_execution_concurrent_exact_replay_is_idempotent(repo):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    node_security, dependencies = persist_inputs(
+        repo,
+        seed="execution-concurrent-replay",
+    )
+    dependency_ids = tuple(
+        dependency.id
+        for dependency in dependencies
+    )
+
+    request = ValuationExecutionRequest(
+        security_id=node_security.id,
+        method="DCF",
+        currency="USD",
+        as_of=utc(2026, 9, 27, 12),
+        model_version="dcf-v1",
+        scenario="BASE",
+        research_cutoff=utc(2026, 9, 27, 12),
+        dependency_ids=dependency_ids,
+    )
+
+    barrier = Barrier(2)
+
+    def execute_once():
+        service = ValuationExecutionService(repo)
+        barrier.wait(timeout=10)
+        return service.execute(request)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [
+            pool.submit(execute_once)
+            for _ in range(2)
+        ]
+        results = tuple(
+            future.result(timeout=30)
+            for future in futures
+        )
+
+    first, second = results
+
+    assert second == first
+    assert second.valuation.id == first.valuation.id
+    assert first.dependency_ids == dependency_ids
+    assert second.dependency_ids == dependency_ids
+
+    with repo.connect() as con:
+        valuation_rows = con.execute(
+            """
+            SELECT COUNT(*)
+            FROM valuation_facts
+            WHERE node_id = %s
+            """,
+            (first.valuation.id,),
+        ).fetchone()[0]
+
+        domain_node_rows = con.execute(
+            """
+            SELECT COUNT(*)
+            FROM domain_nodes
+            WHERE id = %s
+              AND node_type = 'Valuation'
+            """,
+            (first.valuation.id,),
+        ).fetchone()[0]
+
+        dependency_rows = con.execute(
+            """
+            SELECT COUNT(*)
+            FROM domain_edges
+            WHERE source_id = %s
+              AND source_type = 'Valuation'
+              AND edge_type = 'DEPENDS_ON'
+            """,
+            (first.valuation.id,),
+        ).fetchone()[0]
+
+        distinct_dependency_rows = con.execute(
+            """
+            SELECT COUNT(DISTINCT target_id)
+            FROM domain_edges
+            WHERE source_id = %s
+              AND source_type = 'Valuation'
+              AND edge_type = 'DEPENDS_ON'
+            """,
+            (first.valuation.id,),
+        ).fetchone()[0]
+
+    assert valuation_rows == 1
+    assert domain_node_rows == 1
+    assert dependency_rows == len(dependency_ids)
+    assert distinct_dependency_rows == len(dependency_ids)
+
+    assert repo.verify_valuation(
+        first.valuation.id
+    ) == first.valuation

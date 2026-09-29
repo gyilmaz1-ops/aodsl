@@ -1839,8 +1839,9 @@ class PostgreSQLEvidenceRepository:
         )
 
         if result.rowcount != 1:
-            raise RepositoryWriteError(
-                "IDM-W532: VALUATION_PROJECTION_WRITE_LOST"
+            self._assert_valuation_projection_matches(
+                con,
+                valuation,
             )
 
     def _load_exact_estimate(
