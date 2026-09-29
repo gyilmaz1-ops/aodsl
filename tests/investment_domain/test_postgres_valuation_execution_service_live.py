@@ -540,6 +540,13 @@ def test_persist_verified_valuation_uses_repository_owned_mismatch_error(
             """
         ).fetchone()[0]
 
+        valuation_fact_count = con.execute(
+            """
+            SELECT COUNT(*)
+            FROM valuation_facts
+            """
+        ).fetchone()[0]
+
         valuation_edge_count = con.execute(
             """
             SELECT COUNT(*)
@@ -550,6 +557,7 @@ def test_persist_verified_valuation_uses_repository_owned_mismatch_error(
         ).fetchone()[0]
 
     assert valuation_node_count == 0
+    assert valuation_fact_count == 0
     assert valuation_edge_count == 0
 
 
