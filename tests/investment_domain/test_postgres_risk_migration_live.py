@@ -61,7 +61,7 @@ def _insert_domain_node(
 def test_migration_21_creates_risk_facts_projection(con):
     _reset_schema(con)
 
-    assert PostgreSQLMigrationManager(DSN).migrate() == 21
+    assert PostgreSQLMigrationManager(DSN).migrate() == CURRENT_SCHEMA_VERSION
 
     with con.cursor() as cur:
         cur.execute(
@@ -85,7 +85,7 @@ def test_migration_21_creates_risk_facts_projection(con):
         )
         columns = cur.fetchall()
 
-    assert version == CURRENT_SCHEMA_VERSION == 21
+    assert version == CURRENT_SCHEMA_VERSION == 22
 
     assert columns == [
         ("node_id", "NO"),
@@ -98,7 +98,7 @@ def test_migration_21_creates_risk_facts_projection(con):
 
 def test_risk_facts_accepts_matching_risk_domain_node(con):
     _reset_schema(con)
-    assert PostgreSQLMigrationManager(DSN).migrate() == 21
+    assert PostgreSQLMigrationManager(DSN).migrate() == CURRENT_SCHEMA_VERSION
 
     _insert_domain_node(
         con,
@@ -154,7 +154,7 @@ def test_risk_facts_accepts_matching_risk_domain_node(con):
 
 def test_risk_facts_rejects_non_risk_domain_node(con):
     _reset_schema(con)
-    assert PostgreSQLMigrationManager(DSN).migrate() == 21
+    assert PostgreSQLMigrationManager(DSN).migrate() == CURRENT_SCHEMA_VERSION
 
     _insert_domain_node(
         con,
@@ -191,7 +191,7 @@ def test_risk_facts_rejects_non_risk_domain_node(con):
 
 def test_risk_facts_rejects_explicit_wrong_projection_type(con):
     _reset_schema(con)
-    assert PostgreSQLMigrationManager(DSN).migrate() == 21
+    assert PostgreSQLMigrationManager(DSN).migrate() == CURRENT_SCHEMA_VERSION
 
     _insert_domain_node(
         con,
@@ -230,7 +230,7 @@ def test_risk_facts_rejects_explicit_wrong_projection_type(con):
 
 def test_risk_domain_node_delete_is_restricted(con):
     _reset_schema(con)
-    assert PostgreSQLMigrationManager(DSN).migrate() == 21
+    assert PostgreSQLMigrationManager(DSN).migrate() == CURRENT_SCHEMA_VERSION
 
     _insert_domain_node(
         con,

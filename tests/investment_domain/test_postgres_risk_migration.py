@@ -2,13 +2,14 @@ from investment_domain import postgres_migrations
 
 
 def test_risk_facts_is_schema_version_21():
-    assert postgres_migrations.CURRENT_SCHEMA_VERSION == 21
+    assert postgres_migrations.RISK_FACTS.version == 21
+    assert postgres_migrations.RISK_FACTS.name == "add_risk_facts"
 
     migration = postgres_migrations.RISK_FACTS
 
     assert migration.version == 21
     assert migration.name == "add_risk_facts"
-    assert postgres_migrations.MIGRATIONS[-1] is migration
+    assert postgres_migrations.MIGRATIONS[20] is migration
 
 
 def test_risk_facts_creates_exact_projection_contract():

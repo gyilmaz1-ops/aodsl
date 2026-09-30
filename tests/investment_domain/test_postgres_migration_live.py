@@ -32,6 +32,7 @@ from investment_domain.postgres_migrations import (
     RECOMMENDATION_FACTS,
     RECOMMENDATION_DEPENDENCIES,
     RISK_FACTS,
+    RISK_AFFECTS_EDGES,
     PostgreSQLMigrationManager,
     advisory_lock_key,
 )
@@ -221,6 +222,11 @@ def test_live_initial_migration_and_idempotent_restart():
                 21,
                 RISK_FACTS.name,
                 RISK_FACTS.checksum,
+            ),
+            (
+                22,
+                RISK_AFFECTS_EDGES.name,
+                RISK_AFFECTS_EDGES.checksum,
             ),
         ]
 

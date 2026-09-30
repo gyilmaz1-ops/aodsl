@@ -115,6 +115,13 @@ class EvidenceRepository(Protocol):
     ) -> None:
         ...
 
+    def add_risk_affects(
+        self,
+        risk_id: str,
+        target_ids: tuple[str, ...],
+    ) -> None:
+        ...
+
     def add_recommendation(
         self,
         recommendation: Recommendation,
