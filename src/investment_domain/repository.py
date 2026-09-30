@@ -127,6 +127,13 @@ class EvidenceRepository(Protocol):
     ) -> None:
         ...
 
+    def add_recommendation_dependencies(
+        self,
+        recommendation_id: str,
+        dependency_ids: tuple[str, ...],
+    ) -> None:
+        ...
+
     def valuation_inputs_at(
         self,
         valuation_id: str,

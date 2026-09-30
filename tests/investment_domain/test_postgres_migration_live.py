@@ -30,6 +30,7 @@ from investment_domain.postgres_migrations import (
     Migration,
     MigrationError,
     RECOMMENDATION_FACTS,
+    RECOMMENDATION_DEPENDENCIES,
     PostgreSQLMigrationManager,
     advisory_lock_key,
 )
@@ -207,6 +208,11 @@ def test_live_initial_migration_and_idempotent_restart():
                 19,
                 RECOMMENDATION_FACTS.name,
                 RECOMMENDATION_FACTS.checksum,
+            ),
+            (
+                20,
+                RECOMMENDATION_DEPENDENCIES.name,
+                RECOMMENDATION_DEPENDENCIES.checksum,
             ),
         ]
 

@@ -2809,6 +2809,265 @@ class PostgreSQLEvidenceRepository:
         ).fetchone()
         return row is not None
 
+
+    def add_recommendation_dependencies(
+        self,
+        recommendation_id: str,
+        dependency_ids: tuple[str, ...],
+    ) -> None:
+        if (
+            not isinstance(recommendation_id, str)
+            or not recommendation_id.strip()
+            or not is_canonical_content_id(
+                recommendation_id,
+                kind="recommendation",
+            )
+        ):
+            raise ValueError(
+                "recommendation_id must be a canonical Recommendation ID"
+            )
+        if not isinstance(dependency_ids, tuple) or not dependency_ids:
+            raise ValueError("dependency_ids must be a non-empty tuple")
+        if any(
+            not isinstance(dependency_id, str) or not dependency_id
+            for dependency_id in dependency_ids
+        ):
+            raise ValueError(
+                "dependency_ids must contain non-empty strings"
+            )
+        if len(set(dependency_ids)) != len(dependency_ids):
+            raise ValueError(
+                "dependency_ids must not contain duplicates"
+            )
+
+        allowed_target_types = {
+            "Valuation",
+            "Claim",
+            "Risk",
+            "Catalyst",
+        }
+
+        with self.connect() as con:
+            with con.transaction():
+                source_row = con.execute(
+                    """
+                    SELECT
+                        id,
+                        node_type,
+                        canonical_payload,
+                        payload_hash
+                    FROM domain_nodes
+                    WHERE id = %s
+                    """,
+                    (recommendation_id,),
+                ).fetchone()
+
+                if source_row is None:
+                    raise RepositoryWriteError(
+                        "IDM-W507: EDGE_SOURCE_NOT_FOUND"
+                    )
+
+                if source_row[1] != "Recommendation":
+                    raise RepositoryWriteError(
+                        "IDM-W509: EDGE_SOURCE_TYPE_MISMATCH"
+                    )
+
+                projection_row = con.execute(
+                    """
+                    SELECT
+                        security_id,
+                        action,
+                        as_of,
+                        created_by,
+                        rationale_claim_ids
+                    FROM recommendation_facts
+                    WHERE node_id = %s
+                    """,
+                    (recommendation_id,),
+                ).fetchone()
+
+                if projection_row is None:
+                    raise RepositoryWriteError(
+                        "IDM-W549: RECOMMENDATION_PROJECTION_WRITE_LOST"
+                    )
+
+                try:
+                    recommendation = Recommendation(
+                        id=recommendation_id,
+                        security_id=projection_row[0],
+                        action=projection_row[1],
+                        as_of=projection_row[2],
+                        created_by=projection_row[3],
+                        rationale_claim_ids=tuple(
+                            projection_row[4] or ()
+                        ),
+                    )
+                    validate_node(recommendation)
+                except (TypeError, ValueError) as exc:
+                    raise RepositoryWriteError(
+                        "IDM-W550: "
+                        "RECOMMENDATION_PROJECTION_MISMATCH"
+                    ) from exc
+
+                payload, payload_hash = self._payload(
+                    recommendation
+                )
+
+                try:
+                    self._assert_existing_node_matches(
+                        con,
+                        node_id=recommendation.id,
+                        node_type=recommendation.node_type.value,
+                        payload=payload,
+                        payload_hash=payload_hash,
+                    )
+                except RepositoryWriteError as exc:
+                    raise RepositoryWriteError(
+                        "IDM-W550: "
+                        "RECOMMENDATION_PROJECTION_MISMATCH"
+                    ) from exc
+
+                self._assert_recommendation_projection_matches(
+                    con,
+                    recommendation,
+                )
+
+                placeholders = ", ".join(
+                    ["%s"] * len(dependency_ids)
+                )
+
+                target_rows = con.execute(
+                    f"""
+                    SELECT id, node_type
+                    FROM domain_nodes
+                    WHERE id IN ({placeholders})
+                    """,
+                    dependency_ids,
+                ).fetchall()
+
+                targets = {
+                    row[0]: row[1]
+                    for row in target_rows
+                }
+
+                missing = [
+                    dependency_id
+                    for dependency_id in dependency_ids
+                    if dependency_id not in targets
+                ]
+                if missing:
+                    raise RepositoryWriteError(
+                        "IDM-W508: EDGE_TARGET_NOT_FOUND"
+                    )
+
+                wrong_type = [
+                    dependency_id
+                    for dependency_id in dependency_ids
+                    if targets[dependency_id]
+                    not in allowed_target_types
+                ]
+                if wrong_type:
+                    raise RepositoryWriteError(
+                        "IDM-W510: EDGE_TARGET_TYPE_MISMATCH"
+                    )
+
+                supplied_claim_ids = {
+                    dependency_id
+                    for dependency_id in dependency_ids
+                    if targets[dependency_id] == "Claim"
+                }
+                expected_claim_ids = set(
+                    recommendation.rationale_claim_ids
+                )
+
+                if supplied_claim_ids != expected_claim_ids:
+                    raise RepositoryWriteError(
+                        "IDM-W553: "
+                        "RECOMMENDATION_RATIONALE_CLAIM_SET_MISMATCH"
+                    )
+
+                expected = {
+                    (
+                        dependency_id,
+                        targets[dependency_id],
+                    )
+                    for dependency_id in dependency_ids
+                }
+
+                existing_rows = con.execute(
+                    """
+                    SELECT target_id, target_type
+                    FROM domain_edges
+                    WHERE source_id = %s
+                      AND source_type = 'Recommendation'
+                      AND edge_type = 'DEPENDS_ON'
+                    """,
+                    (recommendation_id,),
+                ).fetchall()
+
+                existing = {
+                    (row[0], row[1])
+                    for row in existing_rows
+                }
+
+                if existing:
+                    if existing == expected:
+                        return
+                    raise RepositoryWriteError(
+                        "IDM-W552: "
+                        "RECOMMENDATION_DEPENDENCY_SET_MISMATCH"
+                    )
+
+                for dependency_id in dependency_ids:
+                    con.execute(
+                        """
+                        INSERT INTO domain_edges (
+                            source_id,
+                            source_type,
+                            edge_type,
+                            target_id,
+                            target_type,
+                            created_at
+                        )
+                        VALUES (
+                            %s,
+                            'Recommendation',
+                            'DEPENDS_ON',
+                            %s,
+                            %s,
+                            CURRENT_TIMESTAMP
+                        )
+                        """,
+                        (
+                            recommendation_id,
+                            dependency_id,
+                            targets[dependency_id],
+                        ),
+                    )
+
+                persisted_rows = con.execute(
+                    """
+                    SELECT target_id, target_type
+                    FROM domain_edges
+                    WHERE source_id = %s
+                      AND source_type = 'Recommendation'
+                      AND edge_type = 'DEPENDS_ON'
+                    """,
+                    (recommendation_id,),
+                ).fetchall()
+
+                persisted = {
+                    (row[0], row[1])
+                    for row in persisted_rows
+                }
+
+                if persisted != expected:
+                    raise RepositoryWriteError(
+                        "IDM-W552: "
+                        "RECOMMENDATION_DEPENDENCY_SET_MISMATCH"
+                    )
+
+
     def add_valuation_dependencies(
         self,
         valuation_id: str,

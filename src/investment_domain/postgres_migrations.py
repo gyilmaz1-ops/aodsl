@@ -1056,6 +1056,104 @@ CREATE TABLE recommendation_facts (
     ),
 )
 
+
+RECOMMENDATION_DEPENDENCIES = Migration(
+    version=20,
+    name="add_recommendation_dependencies",
+    statements=(
+        """
+ALTER TABLE domain_edges
+    DROP CONSTRAINT domain_edges_target_type
+""".strip(),
+        """
+ALTER TABLE domain_edges
+    ADD CONSTRAINT domain_edges_target_type
+        CHECK (
+            target_type IN (
+                'Evidence',
+                'Metric',
+                'Calculation',
+                'Claim',
+                'Forecast',
+                'Estimate',
+                'CatalystImpact',
+                'Valuation',
+                'Risk',
+                'Catalyst'
+            )
+        )
+""".strip(),
+        """
+ALTER TABLE domain_edges
+    DROP CONSTRAINT domain_edges_source_relation_target_type
+""".strip(),
+        """
+ALTER TABLE domain_edges
+    ADD CONSTRAINT domain_edges_source_relation_target_type
+        CHECK (
+            (
+                source_type = 'Claim'
+                AND edge_type IN ('SUPPORTED_BY', 'CONTRADICTED_BY')
+                AND target_type = 'Evidence'
+            )
+            OR
+            (
+                source_type = 'Metric'
+                AND edge_type = 'SUPPORTED_BY'
+                AND target_type = 'Evidence'
+            )
+            OR
+            (
+                source_type = 'Calculation'
+                AND edge_type = 'DERIVED_FROM'
+                AND target_type IN ('Metric', 'Calculation')
+            )
+            OR
+            (
+                source_type = 'Estimate'
+                AND edge_type = 'DERIVED_FROM'
+                AND target_type IN ('Metric', 'Calculation', 'Claim')
+            )
+            OR
+            (
+                source_type = 'Valuation'
+                AND edge_type = 'DEPENDS_ON'
+                AND target_type IN (
+                    'Forecast',
+                    'Estimate',
+                    'Metric',
+                    'Calculation',
+                    'CatalystImpact'
+                )
+            )
+            OR
+            (
+                source_type = 'Forecast'
+                AND edge_type = 'CONTAINS'
+                AND target_type = 'Estimate'
+            )
+            OR
+            (
+                source_type = 'Catalyst'
+                AND edge_type = 'AFFECTS'
+                AND target_type IN ('Claim', 'Forecast')
+            )
+            OR
+            (
+                source_type = 'Recommendation'
+                AND edge_type = 'DEPENDS_ON'
+                AND target_type IN (
+                    'Valuation',
+                    'Claim',
+                    'Risk',
+                    'Catalyst'
+                )
+            )
+        )
+""".strip(),
+    ),
+)
+
 MIGRATIONS = (
     INITIAL_SCHEMA,
     EDGE_CREATED_AT,
@@ -1076,6 +1174,7 @@ MIGRATIONS = (
     CATALYST_IMPACT_FACTS,
     EXTEND_VALUATION_DEPENDENCIES_WITH_CATALYST_IMPACT,
     RECOMMENDATION_FACTS,
+    RECOMMENDATION_DEPENDENCIES,
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 
