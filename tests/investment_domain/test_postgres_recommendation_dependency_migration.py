@@ -13,7 +13,6 @@ def _migration_20():
 
 
 def test_recommendation_dependency_constraint_is_schema_version_20():
-    assert CURRENT_SCHEMA_VERSION == 20
 
     migration = _migration_20()
 

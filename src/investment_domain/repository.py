@@ -16,6 +16,7 @@ from .nodes import (
     Forecast,
     Metric,
     Recommendation,
+    Risk,
     Security,
     Valuation,
 )
@@ -105,6 +106,12 @@ class EvidenceRepository(Protocol):
         self,
         forecast_id: str,
         estimate_ids: tuple[str, ...],
+    ) -> None:
+        ...
+
+    def add_risk(
+        self,
+        risk: Risk,
     ) -> None:
         ...
 

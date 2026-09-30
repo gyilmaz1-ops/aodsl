@@ -75,6 +75,7 @@ def clean_database(repo):
     with repo.connect() as con:
         with con.transaction():
             con.execute("DELETE FROM domain_edges")
+            con.execute("DELETE FROM risk_facts")
             con.execute("DELETE FROM catalyst_impact_facts")
             con.execute("DELETE FROM valuation_facts")
             con.execute("DELETE FROM forecast_facts")
@@ -90,6 +91,7 @@ def clean_database(repo):
     with repo.connect() as con:
         with con.transaction():
             con.execute("DELETE FROM domain_edges")
+            con.execute("DELETE FROM risk_facts")
             con.execute("DELETE FROM catalyst_impact_facts")
             con.execute("DELETE FROM valuation_facts")
             con.execute("DELETE FROM forecast_facts")

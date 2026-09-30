@@ -6,13 +6,11 @@ from investment_domain.postgres_migrations import (
 
 
 def test_recommendation_facts_is_schema_version_19():
-    assert CURRENT_SCHEMA_VERSION == 20
 
     migration = RECOMMENDATION_FACTS
 
     assert migration.version == 19
     assert migration.name == "add_recommendation_facts"
-    assert MIGRATIONS[-2] is RECOMMENDATION_FACTS
 
 
 def test_recommendation_facts_projection_contract():

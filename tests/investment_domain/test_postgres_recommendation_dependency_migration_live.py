@@ -24,6 +24,7 @@ def _reset_database() -> None:
 
     with psycopg.connect(DSN, autocommit=True) as con:
         with con.cursor() as cur:
+            cur.execute("DROP TABLE IF EXISTS risk_facts CASCADE")
             cur.execute("DROP TABLE IF EXISTS recommendation_facts CASCADE")
             cur.execute("DROP TABLE IF EXISTS catalyst_impact_facts CASCADE")
             cur.execute("DROP TABLE IF EXISTS catalyst_facts CASCADE")
@@ -92,7 +93,6 @@ def test_live_recommendation_dependency_edge_constraint():
     manager = PostgreSQLMigrationManager(DSN)
 
     assert manager.migrate() == CURRENT_SCHEMA_VERSION
-    assert CURRENT_SCHEMA_VERSION == 20
 
     legal_targets = (
         ("valuation-1", "Valuation"),

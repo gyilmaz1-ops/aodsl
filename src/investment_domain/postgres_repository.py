@@ -29,6 +29,7 @@ from .nodes import (
     Forecast,
     Metric,
     Recommendation,
+    Risk,
     Security,
     Valuation,
 )
@@ -684,6 +685,47 @@ class PostgreSQLEvidenceRepository:
         if actual != expected:
             raise RepositoryWriteError(
                 "IDM-W533: VALUATION_PROJECTION_MISMATCH"
+            )
+
+    @staticmethod
+    def _assert_risk_projection_matches(
+        con,
+        risk: Risk,
+    ) -> None:
+        row = con.execute(
+            """
+            SELECT
+                node_type,
+                subject_id,
+                description,
+                as_of
+            FROM risk_facts
+            WHERE node_id = %s
+            """,
+            (risk.id,),
+        ).fetchone()
+
+        if row is None:
+            raise RepositoryWriteError(
+                "IDM-W554: RISK_PROJECTION_WRITE_LOST"
+            )
+
+        actual = (
+            str(row[0]),
+            str(row[1]),
+            str(row[2]),
+            row[3],
+        )
+        expected = (
+            risk.node_type.value,
+            risk.subject_id,
+            risk.description,
+            risk.as_of,
+        )
+
+        if actual != expected:
+            raise RepositoryWriteError(
+                "IDM-W555: RISK_PROJECTION_MISMATCH"
             )
 
     @staticmethod
@@ -1777,6 +1819,94 @@ class PostgreSQLEvidenceRepository:
                     raise RepositoryWriteError(
                         "IDM-W539: "
                         "FORECAST_COMPOSITION_SET_MISMATCH"
+                    )
+
+    def add_risk(
+        self,
+        risk: Risk,
+    ) -> None:
+        validate_node(risk)
+        payload, payload_hash = self._payload(risk)
+
+        with self.connect() as con:
+            with con.transaction():
+                node_exists, projection_exists = con.execute(
+                    """
+                    SELECT
+                        EXISTS (
+                            SELECT 1
+                            FROM domain_nodes
+                            WHERE id = %s
+                        ),
+                        EXISTS (
+                            SELECT 1
+                            FROM risk_facts
+                            WHERE node_id = %s
+                        )
+                    """,
+                    (
+                        risk.id,
+                        risk.id,
+                    ),
+                ).fetchone()
+
+                if node_exists and not projection_exists:
+                    raise RepositoryWriteError(
+                        "IDM-W554: RISK_PROJECTION_WRITE_LOST"
+                    )
+
+                if projection_exists and not node_exists:
+                    raise RepositoryWriteError(
+                        "IDM-W556: RISK_ORPHAN_PROJECTION"
+                    )
+
+                if node_exists:
+                    self._assert_existing_node_matches(
+                        con,
+                        node_id=risk.id,
+                        node_type=risk.node_type.value,
+                        payload=payload,
+                        payload_hash=payload_hash,
+                    )
+                    self._assert_risk_projection_matches(
+                        con,
+                        risk,
+                    )
+                    return
+
+                self._insert_domain_node(
+                    con,
+                    node_id=risk.id,
+                    node_type=risk.node_type.value,
+                    payload=payload,
+                    payload_hash=payload_hash,
+                )
+
+                result = con.execute(
+                    """
+                    INSERT INTO risk_facts (
+                        node_id,
+                        node_type,
+                        subject_id,
+                        description,
+                        as_of
+                    )
+                    VALUES (%s, %s, %s, %s, %s)
+                    ON CONFLICT (node_id) DO NOTHING
+                    """,
+                    (
+                        risk.id,
+                        risk.node_type.value,
+                        risk.subject_id,
+                        risk.description,
+                        risk.as_of,
+                    ),
+                )
+
+                if result.rowcount != 1:
+                    self._assert_risk_projection_matches(
+                        con,
+                        risk,
                     )
 
     def add_recommendation(

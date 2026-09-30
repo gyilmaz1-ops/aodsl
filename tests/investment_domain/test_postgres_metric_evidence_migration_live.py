@@ -34,6 +34,7 @@ def reset_database():
     with connect() as con:
         with con.transaction():
             con.execute("DROP TABLE IF EXISTS domain_edges CASCADE")
+            con.execute("DROP TABLE IF EXISTS risk_facts CASCADE")
             con.execute("DROP TABLE IF EXISTS recommendation_facts CASCADE")
             con.execute("DROP TABLE IF EXISTS catalyst_impact_facts CASCADE")
             con.execute("DROP TABLE IF EXISTS catalyst_facts CASCADE")

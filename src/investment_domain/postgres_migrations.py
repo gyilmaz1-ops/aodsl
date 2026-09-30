@@ -1154,6 +1154,31 @@ ALTER TABLE domain_edges
     ),
 )
 
+
+RISK_FACTS = Migration(
+    version=21,
+    name="add_risk_facts",
+    statements=(
+        """
+CREATE TABLE risk_facts (
+    node_id TEXT PRIMARY KEY,
+    node_type TEXT NOT NULL DEFAULT 'Risk',
+    subject_id TEXT NOT NULL,
+    description TEXT NOT NULL,
+    as_of TIMESTAMPTZ NOT NULL,
+
+    CONSTRAINT risk_node_type
+        CHECK (node_type = 'Risk'),
+
+    CONSTRAINT risk_domain_node_fk
+        FOREIGN KEY (node_id, node_type)
+        REFERENCES domain_nodes(id, node_type)
+        ON DELETE RESTRICT
+)
+""".strip(),
+    ),
+)
+
 MIGRATIONS = (
     INITIAL_SCHEMA,
     EDGE_CREATED_AT,
@@ -1175,6 +1200,7 @@ MIGRATIONS = (
     EXTEND_VALUATION_DEPENDENCIES_WITH_CATALYST_IMPACT,
     RECOMMENDATION_FACTS,
     RECOMMENDATION_DEPENDENCIES,
+    RISK_FACTS,
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 
