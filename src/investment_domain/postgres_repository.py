@@ -2390,6 +2390,157 @@ class PostgreSQLEvidenceRepository:
                         recommendation,
                     )
 
+    def recommendation_at(
+        self,
+        recommendation_id: str,
+        research_cutoff: datetime,
+    ) -> Recommendation | None:
+        if not is_canonical_content_id(
+            recommendation_id,
+            kind="recommendation",
+        ):
+            raise ValueError(
+                "recommendation_id must be a canonical Recommendation ID"
+            )
+
+        if (
+            research_cutoff.tzinfo is None
+            or research_cutoff.utcoffset() is None
+        ):
+            raise ValueError(
+                "research_cutoff must be timezone-aware"
+            )
+
+        with self.connect() as con:
+            anchor_row = con.execute(
+                """
+                SELECT
+                    node_type,
+                    canonical_payload,
+                    payload_hash
+                FROM domain_nodes
+                WHERE id = %s
+                """,
+                (recommendation_id,),
+            ).fetchone()
+
+            if anchor_row is None:
+                return None
+
+            if str(anchor_row[0]) != NodeType.RECOMMENDATION.value:
+                raise RepositoryReadError(
+                    "IDM-R563: RECOMMENDATION_TYPE_MISMATCH"
+                )
+
+            row = con.execute(
+                """
+                SELECT
+                    node_type,
+                    security_id,
+                    action,
+                    as_of,
+                    created_by,
+                    rationale_claim_ids
+                FROM recommendation_facts
+                WHERE node_id = %s
+                """,
+                (recommendation_id,),
+            ).fetchone()
+
+            if row is None:
+                raise RepositoryReadError(
+                    "IDM-R566: RECOMMENDATION_PROJECTION_NOT_FOUND"
+                )
+
+            if str(row[0]) != NodeType.RECOMMENDATION.value:
+                raise RepositoryReadError(
+                    "IDM-R563: RECOMMENDATION_TYPE_MISMATCH"
+                )
+
+            try:
+                recommendation = Recommendation(
+                    id=recommendation_id,
+                    security_id=str(row[1]),
+                    action=str(row[2]),
+                    as_of=row[3],
+                    created_by=str(row[4]),
+                    rationale_claim_ids=tuple(row[5]),
+                )
+                validate_node(recommendation)
+            except (TypeError, ValueError) as exc:
+                raise RepositoryReadError(
+                    "IDM-R564: INVALID_STORED_RECOMMENDATION"
+                ) from exc
+
+            payload, payload_hash = self._payload(
+                recommendation
+            )
+
+            if (
+                anchor_row[1] != json.loads(payload)
+                or str(anchor_row[2]) != payload_hash
+            ):
+                raise RepositoryReadError(
+                    "IDM-R565: RECOMMENDATION_INTEGRITY_FAILURE"
+                )
+
+            if recommendation.as_of > research_cutoff:
+                return None
+
+            return recommendation
+
+    def latest_recommendation_at(
+        self,
+        security_id: str,
+        research_cutoff: datetime,
+    ) -> Recommendation | None:
+        if not isinstance(security_id, str) or not security_id.strip():
+            raise ValueError(
+                "security_id must not be empty"
+            )
+
+        if (
+            research_cutoff.tzinfo is None
+            or research_cutoff.utcoffset() is None
+        ):
+            raise ValueError(
+                "research_cutoff must be timezone-aware"
+            )
+
+        with self.connect() as con:
+            rows = con.execute(
+                """
+                SELECT node_id
+                FROM recommendation_facts
+                WHERE security_id = %s
+                  AND as_of = (
+                      SELECT MAX(as_of)
+                      FROM recommendation_facts
+                      WHERE security_id = %s
+                        AND as_of <= %s
+                  )
+                ORDER BY node_id
+                """,
+                (
+                    security_id,
+                    security_id,
+                    research_cutoff,
+                ),
+            ).fetchall()
+
+        if not rows:
+            return None
+
+        if len(rows) != 1:
+            raise RepositoryReadError(
+                "IDM-R567: RECOMMENDATION_PIT_AMBIGUITY"
+            )
+
+        return self.recommendation_at(
+            str(rows[0][0]),
+            research_cutoff,
+        )
+
     def add_valuation(
         self,
         valuation: Valuation,

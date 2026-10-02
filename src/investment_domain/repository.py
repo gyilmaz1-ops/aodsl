@@ -142,6 +142,20 @@ class EvidenceRepository(Protocol):
     ) -> None:
         ...
 
+    def recommendation_at(
+        self,
+        recommendation_id: str,
+        research_cutoff: datetime,
+    ) -> Recommendation | None:
+        ...
+
+    def latest_recommendation_at(
+        self,
+        security_id: str,
+        research_cutoff: datetime,
+    ) -> Recommendation | None:
+        ...
+
     def add_valuation(
         self,
         valuation: Valuation,
