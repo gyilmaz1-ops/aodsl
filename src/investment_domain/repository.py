@@ -115,6 +115,20 @@ class EvidenceRepository(Protocol):
     ) -> None:
         ...
 
+    def risk_at(
+        self,
+        risk_id: str,
+        research_cutoff: datetime,
+    ) -> Risk | None:
+        ...
+
+    def latest_risk_at(
+        self,
+        subject_id: str,
+        research_cutoff: datetime,
+    ) -> Risk | None:
+        ...
+
     def add_risk_affects(
         self,
         risk_id: str,

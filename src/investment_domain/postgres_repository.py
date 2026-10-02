@@ -1909,6 +1909,151 @@ class PostgreSQLEvidenceRepository:
                         risk,
                     )
 
+    def risk_at(
+        self,
+        risk_id: str,
+        research_cutoff: datetime,
+    ) -> Risk | None:
+        if not is_canonical_content_id(
+            risk_id,
+            kind="risk",
+        ):
+            raise ValueError(
+                "risk_id must be a canonical Risk ID"
+            )
+
+        if (
+            research_cutoff.tzinfo is None
+            or research_cutoff.utcoffset() is None
+        ):
+            raise ValueError(
+                "research_cutoff must be timezone-aware"
+            )
+
+        with self.connect() as con:
+            anchor_row = con.execute(
+                """
+                SELECT
+                    node_type,
+                    canonical_payload,
+                    payload_hash
+                FROM domain_nodes
+                WHERE id = %s
+                """,
+                (risk_id,),
+            ).fetchone()
+
+            if anchor_row is None:
+                return None
+
+            if str(anchor_row[0]) != NodeType.RISK.value:
+                raise RepositoryReadError(
+                    "IDM-R558: RISK_TYPE_MISMATCH"
+                )
+
+            row = con.execute(
+                """
+                SELECT
+                    node_type,
+                    subject_id,
+                    description,
+                    as_of
+                FROM risk_facts
+                WHERE node_id = %s
+                """,
+                (risk_id,),
+            ).fetchone()
+
+            if row is None:
+                raise RepositoryReadError(
+                    "IDM-R561: RISK_PROJECTION_NOT_FOUND"
+                )
+
+            if str(row[0]) != NodeType.RISK.value:
+                raise RepositoryReadError(
+                    "IDM-R558: RISK_TYPE_MISMATCH"
+                )
+
+            try:
+                risk = Risk(
+                    id=risk_id,
+                    subject_id=str(row[1]),
+                    description=str(row[2]),
+                    as_of=row[3],
+                )
+                validate_node(risk)
+            except (TypeError, ValueError) as exc:
+                raise RepositoryReadError(
+                    "IDM-R559: INVALID_STORED_RISK"
+                ) from exc
+
+            payload, payload_hash = self._payload(risk)
+
+            if (
+                anchor_row[1] != json.loads(payload)
+                or str(anchor_row[2]) != payload_hash
+            ):
+                raise RepositoryReadError(
+                    "IDM-R560: RISK_INTEGRITY_FAILURE"
+                )
+
+            if risk.as_of > research_cutoff:
+                return None
+
+            return risk
+
+    def latest_risk_at(
+        self,
+        subject_id: str,
+        research_cutoff: datetime,
+    ) -> Risk | None:
+        if not isinstance(subject_id, str) or not subject_id.strip():
+            raise ValueError(
+                "subject_id must not be empty"
+            )
+
+        if (
+            research_cutoff.tzinfo is None
+            or research_cutoff.utcoffset() is None
+        ):
+            raise ValueError(
+                "research_cutoff must be timezone-aware"
+            )
+
+        with self.connect() as con:
+            rows = con.execute(
+                """
+                SELECT node_id
+                FROM risk_facts
+                WHERE subject_id = %s
+                  AND as_of = (
+                      SELECT MAX(as_of)
+                      FROM risk_facts
+                      WHERE subject_id = %s
+                        AND as_of <= %s
+                  )
+                ORDER BY node_id
+                """,
+                (
+                    subject_id,
+                    subject_id,
+                    research_cutoff,
+                ),
+            ).fetchall()
+
+        if not rows:
+            return None
+
+        if len(rows) != 1:
+            raise RepositoryReadError(
+                "IDM-R562: RISK_PIT_AMBIGUITY"
+            )
+
+        return self.risk_at(
+            str(rows[0][0]),
+            research_cutoff,
+        )
+
     def add_risk_affects(
         self,
         risk_id: str,
