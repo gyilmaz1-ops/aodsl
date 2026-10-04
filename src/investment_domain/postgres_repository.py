@@ -5995,17 +5995,17 @@ class PostgreSQLEvidenceRepository:
 
         if row is None:
             raise RepositoryReadError(
-                "Calculation persistent state not found"
+                "IDM-R595: CALCULATION_NOT_FOUND"
             )
 
         if str(row[0]) != NodeType.CALCULATION.value:
             raise RepositoryReadError(
-                "Calculation persistent node type mismatch"
+                "IDM-R596: CALCULATION_TYPE_MISMATCH"
             )
 
         if row[3] is None:
             raise RepositoryReadError(
-                "Calculation projection not found"
+                "IDM-R597: CALCULATION_PROJECTION_NOT_FOUND"
             )
 
         try:
@@ -6023,19 +6023,23 @@ class PostgreSQLEvidenceRepository:
             validate_calculation(calculation)
         except (TypeError, ValueError) as exc:
             raise RepositoryReadError(
-                "Invalid stored Calculation projection"
+                "IDM-R598: INVALID_STORED_CALCULATION"
             ) from exc
 
         if str(row[3]) != NodeType.CALCULATION.value:
             raise RepositoryReadError(
-                "Calculation projection type mismatch"
+                "IDM-R596: CALCULATION_TYPE_MISMATCH"
             )
 
-        self._assert_stored_node_integrity(
-            node=calculation,
-            stored_payload=row[1],
-            stored_hash=row[2],
-        )
+        payload, payload_hash = self._payload(calculation)
+
+        if (
+            row[1] != json.loads(payload)
+            or str(row[2]) != payload_hash
+        ):
+            raise RepositoryReadError(
+                "IDM-R599: CALCULATION_INTEGRITY_FAILURE"
+            )
 
         expected_projection = (
             calculation.node_type.value,
@@ -6061,7 +6065,7 @@ class PostgreSQLEvidenceRepository:
 
         if actual_projection != expected_projection:
             raise RepositoryReadError(
-                "Stored Calculation projection mismatch"
+                "IDM-R599: CALCULATION_INTEGRITY_FAILURE"
             )
 
         return calculation
@@ -6103,22 +6107,22 @@ class PostgreSQLEvidenceRepository:
 
         if row is None:
             raise RepositoryReadError(
-                "Metric dependency persistent state not found"
+                "IDM-R600: CALCULATION_METRIC_DEPENDENCY_NOT_FOUND"
             )
 
         if str(row[16]) != NodeType.METRIC.value:
             raise RepositoryReadError(
-                "Metric dependency node type mismatch"
+                "IDM-R601: CALCULATION_METRIC_DEPENDENCY_TYPE_MISMATCH"
             )
 
         if row[0] is None:
             raise RepositoryReadError(
-                "Metric dependency projection not found"
+                "IDM-R600: CALCULATION_METRIC_DEPENDENCY_NOT_FOUND"
             )
 
         if str(row[1]) != NodeType.METRIC.value:
             raise RepositoryReadError(
-                "Metric dependency projection type mismatch"
+                "IDM-R601: CALCULATION_METRIC_DEPENDENCY_TYPE_MISMATCH"
             )
 
         try:
@@ -6142,7 +6146,7 @@ class PostgreSQLEvidenceRepository:
             validate_node(metric)
         except (TypeError, ValueError) as exc:
             raise RepositoryReadError(
-                "Invalid stored Metric dependency"
+                "IDM-R602: INVALID_STORED_CALCULATION_METRIC_DEPENDENCY"
             ) from exc
 
         self._assert_stored_metric_integrity(
@@ -6163,7 +6167,7 @@ class PostgreSQLEvidenceRepository:
     ) -> tuple[Calculation, bool]:
         if calculation_id in visiting:
             raise RepositoryReadError(
-                "Calculation dependency cycle detected"
+                "IDM-R603: CALCULATION_DEPENDENCY_CYCLE"
             )
 
         calculation = self._load_exact_calculation(
@@ -6194,7 +6198,7 @@ class PostgreSQLEvidenceRepository:
             or len(edge_rows) != len(expected)
         ):
             raise RepositoryReadError(
-                "Calculation input provenance set mismatch"
+                "IDM-R604: CALCULATION_PROVENANCE_MISMATCH"
             )
 
         edges_by_target = {
@@ -6251,7 +6255,7 @@ class PostgreSQLEvidenceRepository:
 
                 else:
                     raise RepositoryReadError(
-                        "Invalid Calculation dependency type"
+                        "IDM-R605: INVALID_CALCULATION_DEPENDENCY_TYPE"
                     )
 
             return calculation, True
@@ -6281,7 +6285,7 @@ class PostgreSQLEvidenceRepository:
 
         if calculation_id in visiting:
             raise RepositoryReadError(
-                "Calculation dependency cycle"
+                "IDM-R603: CALCULATION_DEPENDENCY_CYCLE"
             )
 
         visiting.add(calculation_id)
@@ -6314,7 +6318,7 @@ class PostgreSQLEvidenceRepository:
                 or len(edge_rows) != len(expected)
             ):
                 raise RepositoryReadError(
-                    "Calculation input provenance set mismatch"
+                    "IDM-R604: CALCULATION_PROVENANCE_MISMATCH"
                 )
 
             edges_by_target = {
@@ -6354,7 +6358,7 @@ class PostgreSQLEvidenceRepository:
 
                 else:
                     raise RepositoryReadError(
-                        "Invalid Calculation dependency type"
+                        "IDM-R605: INVALID_CALCULATION_DEPENDENCY_TYPE"
                     )
 
             try:

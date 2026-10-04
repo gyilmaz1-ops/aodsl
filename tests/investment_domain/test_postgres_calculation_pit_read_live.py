@@ -278,7 +278,7 @@ def test_calculation_at_rejects_naive_research_cutoff(repo):
 def test_missing_calculation_fails_closed(repo):
     missing = "calculation:" + "f" * 64
 
-    with pytest.raises(RepositoryReadError):
+    with pytest.raises(RepositoryReadError, match="IDM-R595: CALCULATION_NOT_FOUND"):
         repo.calculation_at(
             missing,
             utc(2026, 9, 1, 12),
@@ -402,7 +402,7 @@ def test_calculation_projection_corruption_fails_closed(repo):
                 (Decimal("999.00"), calc.id),
             )
 
-    with pytest.raises(RepositoryReadError):
+    with pytest.raises(RepositoryReadError, match="IDM-R599: CALCULATION_INTEGRITY_FAILURE"):
         repo.calculation_at(
             calc.id,
             utc(2026, 9, 1, 12),
@@ -426,7 +426,7 @@ def test_missing_calculation_provenance_edge_fails_closed(repo):
                 (calc.id,),
             )
 
-    with pytest.raises(RepositoryReadError):
+    with pytest.raises(RepositoryReadError, match="IDM-R604: CALCULATION_PROVENANCE_MISMATCH"):
         repo.calculation_at(
             calc.id,
             utc(2026, 9, 1, 12),
@@ -524,7 +524,7 @@ def test_missing_exact_metric_projection_fails_closed(repo):
                 (metric_node.id,),
             )
 
-    with pytest.raises(RepositoryReadError):
+    with pytest.raises(RepositoryReadError, match="IDM-R600: CALCULATION_METRIC_DEPENDENCY_NOT_FOUND"):
         repo.calculation_at(
             calc.id,
             utc(2026, 9, 1, 12),
@@ -840,3 +840,381 @@ def test_future_parent_edge_does_not_look_ahead_into_child_provenance(repo):
             )
 
     assert repo.calculation_at(parent.id, cutoff) is None
+
+
+# R595-R605 Calculation read diagnostic contract.
+
+
+def test_calculation_at_wrong_anchor_type_uses_r596(repo):
+    m = metric("r596")
+    calc = persist_calculation_with_metric(repo, m)
+
+    with repo.connect() as con:
+        with con.transaction():
+            con.execute(
+                "ALTER TABLE calculation_facts "
+                "DROP CONSTRAINT calculation_domain_node_fk"
+            )
+            con.execute(
+                "ALTER TABLE domain_edges "
+                "DROP CONSTRAINT domain_edges_source_typed_fk"
+            )
+            con.execute(
+                "UPDATE domain_nodes SET node_type = 'Claim' WHERE id = %s",
+                (calc.id,),
+            )
+
+    try:
+        with pytest.raises(
+            RepositoryReadError,
+            match="IDM-R596: CALCULATION_TYPE_MISMATCH",
+        ):
+            repo.calculation_at(calc.id, utc(2026, 9, 1, 12))
+    finally:
+        with repo.connect() as con:
+            with con.transaction():
+                con.execute(
+                    "UPDATE domain_nodes SET node_type = 'Calculation' "
+                    "WHERE id = %s",
+                    (calc.id,),
+                )
+
+        with repo.connect() as con:
+            with con.transaction():
+                con.execute(
+                    '''
+                    ALTER TABLE calculation_facts
+                    ADD CONSTRAINT calculation_domain_node_fk
+                    FOREIGN KEY (node_id, node_type)
+                    REFERENCES domain_nodes(id, node_type)
+                    ON DELETE RESTRICT
+                    '''
+                )
+                con.execute(
+                    '''
+                    ALTER TABLE domain_edges
+                    ADD CONSTRAINT domain_edges_source_typed_fk
+                    FOREIGN KEY (source_id, source_type)
+                    REFERENCES domain_nodes(id, node_type)
+                    ON DELETE RESTRICT
+                    '''
+                )
+
+
+def test_calculation_at_missing_projection_uses_r597(repo):
+    m = metric("r597")
+    calc = persist_calculation_with_metric(repo, m)
+
+    with repo.connect() as con:
+        with con.transaction():
+            con.execute(
+                "DELETE FROM calculation_facts WHERE node_id = %s",
+                (calc.id,),
+            )
+
+    with pytest.raises(
+        RepositoryReadError,
+        match="IDM-R597: CALCULATION_PROJECTION_NOT_FOUND",
+    ):
+        repo.calculation_at(calc.id, utc(2026, 9, 1, 12))
+
+
+def test_calculation_at_invalid_stored_calculation_uses_r598(repo):
+    m = metric("r598")
+    calc = persist_calculation_with_metric(repo, m)
+
+    with repo.connect() as con:
+        with con.transaction():
+            con.execute(
+                """
+                UPDATE calculation_facts
+                SET formula = %s
+                WHERE node_id = %s
+                """,
+                ("__invalid_formula__", calc.id),
+            )
+
+    with pytest.raises(
+        RepositoryReadError,
+        match="IDM-R598: INVALID_STORED_CALCULATION",
+    ):
+        repo.calculation_at(calc.id, utc(2026, 9, 1, 12))
+
+
+def test_calculation_metric_wrong_anchor_type_uses_r601(repo):
+    m = metric("r601")
+    calc = persist_calculation_with_metric(repo, m)
+
+    with repo.connect() as con:
+        with con.transaction():
+            con.execute(
+                "ALTER TABLE metric_facts "
+                "DROP CONSTRAINT metric_domain_node_fk"
+            )
+            con.execute(
+                "ALTER TABLE domain_edges "
+                "DROP CONSTRAINT domain_edges_target_typed_fk"
+            )
+            con.execute(
+                "UPDATE domain_nodes SET node_type = 'Claim' WHERE id = %s",
+                (m.id,),
+            )
+
+    try:
+        with pytest.raises(
+            RepositoryReadError,
+            match="IDM-R601: CALCULATION_METRIC_DEPENDENCY_TYPE_MISMATCH",
+        ):
+            repo.calculation_at(calc.id, utc(2026, 9, 1, 12))
+    finally:
+        with repo.connect() as con:
+            with con.transaction():
+                con.execute(
+                    "UPDATE domain_nodes SET node_type = 'Metric' WHERE id = %s",
+                    (m.id,),
+                )
+
+        with repo.connect() as con:
+            with con.transaction():
+                con.execute(
+                    '''
+                    ALTER TABLE metric_facts
+                    ADD CONSTRAINT metric_domain_node_fk
+                    FOREIGN KEY (node_id, node_type)
+                    REFERENCES domain_nodes(id, node_type)
+                    ON DELETE RESTRICT
+                    '''
+                )
+                con.execute(
+                    '''
+                    ALTER TABLE domain_edges
+                    ADD CONSTRAINT domain_edges_target_typed_fk
+                    FOREIGN KEY (target_id, target_type)
+                    REFERENCES domain_nodes(id, node_type)
+                    ON DELETE RESTRICT
+                    '''
+                )
+
+
+def test_invalid_stored_calculation_metric_dependency_uses_r602(repo):
+    m = metric("r602")
+    calc = persist_calculation_with_metric(repo, m)
+
+    with repo.connect() as con:
+        with con.transaction():
+            con.execute(
+                """
+                UPDATE metric_facts
+                SET name = %s
+                WHERE node_id = %s
+                """,
+                ("__invalid_metric__", m.id),
+            )
+
+    with pytest.raises(
+        RepositoryReadError,
+        match="IDM-R602: INVALID_STORED_CALCULATION_METRIC_DEPENDENCY",
+    ):
+        repo.calculation_at(calc.id, utc(2026, 9, 1, 12))
+
+
+def test_invalid_calculation_dependency_type_uses_r605(repo):
+    m = metric("r605")
+    calc = persist_calculation_with_metric(repo, m)
+
+    with repo.connect() as con:
+        with con.transaction():
+            con.execute(
+                """
+                ALTER TABLE domain_edges
+                DROP CONSTRAINT domain_edges_target_type
+                """
+            )
+            con.execute(
+                """
+                ALTER TABLE domain_edges
+                DROP CONSTRAINT domain_edges_target_typed_fk
+                """
+            )
+            con.execute(
+                """
+                ALTER TABLE domain_edges
+                DROP CONSTRAINT domain_edges_source_relation_target_type
+                """
+            )
+            con.execute(
+                """
+                UPDATE domain_edges
+                SET target_type = 'Claim'
+                WHERE source_id = %s
+                  AND target_id = %s
+                  AND edge_type = 'DERIVED_FROM'
+                """,
+                (calc.id, m.id),
+            )
+
+    try:
+        with pytest.raises(
+            RepositoryReadError,
+            match="IDM-R605: INVALID_CALCULATION_DEPENDENCY_TYPE",
+        ):
+            repo.calculation_at(calc.id, utc(2026, 9, 1, 12))
+    finally:
+        # Re-run migrations to restore canonical edge constraints after
+        # restoring the corrupted discriminator.
+        with repo.connect() as con:
+            with con.transaction():
+                con.execute(
+                    """
+                    UPDATE domain_edges
+                    SET target_type = 'Metric'
+                    WHERE source_id = %s
+                      AND target_id = %s
+                      AND edge_type = 'DERIVED_FROM'
+                    """,
+                    (calc.id, m.id),
+                )
+        with repo.connect() as con:
+            with con.transaction():
+                con.execute(
+                    """
+                    ALTER TABLE domain_edges
+                    ADD CONSTRAINT domain_edges_target_type
+                    CHECK (
+                        target_type IN (
+                            'Evidence',
+                            'Metric',
+                            'Calculation',
+                            'Claim',
+                            'Forecast',
+                            'Estimate',
+                            'CatalystImpact',
+                            'Valuation',
+                            'Risk',
+                            'Catalyst'
+                        )
+                    )
+                    """
+                )
+                con.execute(
+                    """
+                    ALTER TABLE domain_edges
+                    ADD CONSTRAINT domain_edges_source_relation_target_type
+                    CHECK (
+                        (
+                            source_type = 'Claim'
+                            AND edge_type IN (
+                                'SUPPORTED_BY',
+                                'CONTRADICTED_BY'
+                            )
+                            AND target_type = 'Evidence'
+                        )
+                        OR (
+                            source_type = 'Metric'
+                            AND edge_type = 'SUPPORTED_BY'
+                            AND target_type = 'Evidence'
+                        )
+                        OR (
+                            source_type = 'Calculation'
+                            AND edge_type = 'DERIVED_FROM'
+                            AND target_type IN (
+                                'Metric',
+                                'Calculation'
+                            )
+                        )
+                        OR (
+                            source_type = 'Estimate'
+                            AND edge_type = 'DERIVED_FROM'
+                            AND target_type IN (
+                                'Metric',
+                                'Calculation',
+                                'Claim'
+                            )
+                        )
+                        OR (
+                            source_type = 'Valuation'
+                            AND edge_type = 'DEPENDS_ON'
+                            AND target_type IN (
+                                'Forecast',
+                                'Estimate',
+                                'Metric',
+                                'Calculation',
+                                'CatalystImpact'
+                            )
+                        )
+                        OR (
+                            source_type = 'Forecast'
+                            AND edge_type = 'CONTAINS'
+                            AND target_type = 'Estimate'
+                        )
+                        OR (
+                            source_type = 'Catalyst'
+                            AND edge_type = 'AFFECTS'
+                            AND target_type IN (
+                                'Claim',
+                                'Forecast'
+                            )
+                        )
+                        OR (
+                            source_type = 'Recommendation'
+                            AND edge_type = 'DEPENDS_ON'
+                            AND target_type IN (
+                                'Valuation',
+                                'Claim',
+                                'Risk',
+                                'Catalyst'
+                            )
+                        )
+                        OR (
+                            source_type = 'Risk'
+                            AND edge_type = 'AFFECTS'
+                            AND target_type IN (
+                                'Claim',
+                                'Forecast',
+                                'Valuation'
+                            )
+                        )
+                    )
+                    """
+                )
+                con.execute(
+                    """
+                    ALTER TABLE domain_edges
+                    ADD CONSTRAINT domain_edges_target_typed_fk
+                    FOREIGN KEY (target_id, target_type)
+                    REFERENCES domain_nodes(id, node_type)
+                    ON DELETE RESTRICT
+                    """
+                )
+def test_calculation_visible_cycle_guard_uses_r603(repo):
+    metric_node = metric("r603-visible-cycle")
+    calc = persist_calculation_with_metric(repo, metric_node)
+
+    with repo.connect() as con:
+        with pytest.raises(
+            RepositoryReadError,
+            match="IDM-R603: CALCULATION_DEPENDENCY_CYCLE",
+        ):
+            repo._calculation_visible_at(
+                con,
+                calc.id,
+                utc(2026, 9, 1, 12),
+                {calc.id},
+            )
+
+
+def test_calculation_reproducibility_cycle_guard_uses_r603(repo):
+    metric_node = metric("r603-repro-cycle")
+    calc = persist_calculation_with_metric(repo, metric_node)
+
+    with repo.connect() as con:
+        with pytest.raises(
+            RepositoryReadError,
+            match="IDM-R603: CALCULATION_DEPENDENCY_CYCLE",
+        ):
+            repo._verify_calculation_reproducibility(
+                con,
+                calc.id,
+                {calc.id},
+                {},
+            )

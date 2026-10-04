@@ -266,7 +266,7 @@ def test_extra_provenance_edge_fails_closed(repo):
 
     with pytest.raises(
         RepositoryReadError,
-        match="input provenance set mismatch",
+        match="IDM-R604: CALCULATION_PROVENANCE_MISMATCH",
     ):
         repo.verify_calculation(calc.id)
 
@@ -553,7 +553,7 @@ def test_fake_cycle_is_rejected_as_provenance_corruption(repo):
 
     with pytest.raises(
         RepositoryReadError,
-        match="input provenance set mismatch",
+        match="IDM-R604: CALCULATION_PROVENANCE_MISMATCH",
     ):
         repo.verify_calculation(second.id)
 
