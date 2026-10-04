@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import os
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -632,4 +634,51 @@ def test_valuation_inputs_at_rejects_calculation_with_future_transitive_provenan
         repo.valuation_inputs_at(
             node_valuation.id,
             cutoff,
+        )
+
+
+def test_valuation_inputs_at_rejects_valuation_canonical_anchor_tampering(
+    repo,
+):
+    node = valuation("r549-public-regression")
+    repo.add_valuation(node)
+
+    with repo.connect() as con:
+        original = con.execute(
+            """
+            SELECT canonical_payload
+            FROM domain_nodes
+            WHERE id = %s
+            """,
+            (node.id,),
+        ).fetchone()
+
+        assert original is not None
+
+        corrupted_payload = dict(original[0])
+        corrupted_payload["value"] = "999.99"
+
+        con.execute(
+            """
+            UPDATE domain_nodes
+            SET canonical_payload = %s::jsonb
+            WHERE id = %s
+            """,
+            (
+                json.dumps(
+                    corrupted_payload,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+                node.id,
+            ),
+        )
+
+    with pytest.raises(
+        RepositoryReadError,
+        match="IDM-R549: VALUATION_INTEGRITY_FAILURE",
+    ):
+        repo.valuation_inputs_at(
+            node.id,
+            utc(2026, 9, 30, 12),
         )
