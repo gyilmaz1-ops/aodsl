@@ -6369,7 +6369,7 @@ class PostgreSQLEvidenceRepository:
                 )
             except (TypeError, ValueError) as exc:
                 raise RepositoryReadError(
-                    "Calculation materialization is not reproducible"
+                    "IDM-R606: CALCULATION_MATERIALIZATION_NOT_REPRODUCIBLE"
                 ) from exc
 
             verified = (

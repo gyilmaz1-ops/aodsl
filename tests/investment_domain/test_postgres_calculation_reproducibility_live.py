@@ -273,7 +273,7 @@ def test_nonreproducible_child_makes_parent_fail_closed(repo):
 
     with pytest.raises(
         RepositoryReadError,
-        match="materialization is not reproducible",
+        match="IDM-R606: CALCULATION_MATERIALIZATION_NOT_REPRODUCIBLE",
     ):
         repo.verify_calculation(parent.id)
 
@@ -385,7 +385,7 @@ def test_materialized_unit_mismatch_fails_closed(repo):
 
     with pytest.raises(
         RepositoryReadError,
-        match="materialization is not reproducible",
+        match="IDM-R606: CALCULATION_MATERIALIZATION_NOT_REPRODUCIBLE",
     ):
         repo.verify_calculation(calc.id)
 
@@ -420,7 +420,7 @@ def test_materialized_currency_mismatch_fails_closed(repo):
 
     with pytest.raises(
         RepositoryReadError,
-        match="materialization is not reproducible",
+        match="IDM-R606: CALCULATION_MATERIALIZATION_NOT_REPRODUCIBLE",
     ):
         repo.verify_calculation(calc.id)
 
