@@ -22,7 +22,7 @@ def utc(year, month, day, hour):
 def valuation(
     seed,
     *,
-    security_id="security:TEST",
+    security_id="security:test:test",
     method="DCF",
     scenario="BASE",
     as_of=None,
@@ -119,7 +119,7 @@ def test_valuation_at_rejects_naive_cutoff_before_database(repo):
 
 def test_latest_valuation_at_returns_none_when_stream_has_no_node(repo):
     assert repo.latest_valuation_at(
-        "security:MISSING",
+        "security:test:missing",
         "DCF",
         "BASE",
         utc(2026, 9, 30, 12),
@@ -127,7 +127,7 @@ def test_latest_valuation_at_returns_none_when_stream_has_no_node(repo):
 
 
 def test_latest_valuation_at_returns_latest_visible_node(repo):
-    security_id = "security:LATEST"
+    security_id = "security:test:latest"
 
     older = valuation(
         "older",
@@ -152,7 +152,7 @@ def test_latest_valuation_at_returns_latest_visible_node(repo):
 
 
 def test_latest_valuation_at_ignores_future_node_for_selection(repo):
-    security_id = "security:FUTURE-SELECTION"
+    security_id = "security:test:future-selection"
 
     visible = valuation(
         "visible",
@@ -179,7 +179,7 @@ def test_latest_valuation_at_ignores_future_node_for_selection(repo):
 def test_latest_valuation_at_exact_cutoff_is_visible(repo):
     node = valuation(
         "exact-cutoff",
-        security_id="security:EXACT",
+        security_id="security:test:exact",
         as_of=utc(2026, 9, 30, 12),
     )
     repo.add_valuation(node)
@@ -195,7 +195,7 @@ def test_latest_valuation_at_exact_cutoff_is_visible(repo):
 def test_latest_valuation_at_rejects_naive_cutoff(repo):
     with pytest.raises(ValueError, match="timezone-aware"):
         repo.latest_valuation_at(
-            "security:TEST",
+            "security:test:test",
             "DCF",
             "BASE",
             datetime(2026, 9, 30, 12),
@@ -215,7 +215,7 @@ def test_latest_valuation_at_rejects_empty_security_id(repo):
 def test_latest_valuation_at_rejects_empty_method(repo):
     with pytest.raises(ValueError, match="method must not be empty"):
         repo.latest_valuation_at(
-            "security:TEST",
+            "security:test:test",
             "",
             "BASE",
             utc(2026, 9, 30, 12),
@@ -225,16 +225,16 @@ def test_latest_valuation_at_rejects_empty_method(repo):
 def test_latest_valuation_at_rejects_empty_scenario(repo):
     with pytest.raises(ValueError, match="scenario must not be empty"):
         repo.latest_valuation_at(
-            "security:TEST",
+            "security:test:test",
             "DCF",
             "",
             utc(2026, 9, 30, 12),
         )
 
 
-def test_latest_valuation_at_accepts_noncanonical_business_reference(repo):
+def test_latest_valuation_at_accepts_canonical_business_reference(repo):
     assert repo.latest_valuation_at(
-        "security:business-reference",
+        "security:test:business-reference",
         "DCF",
         "BASE",
         utc(2026, 9, 30, 12),
@@ -242,7 +242,7 @@ def test_latest_valuation_at_accepts_noncanonical_business_reference(repo):
 
 
 def test_latest_valuation_at_separates_method_streams(repo):
-    security_id = "security:METHOD"
+    security_id = "security:test:method"
 
     dcf = valuation(
         "dcf",
@@ -269,7 +269,7 @@ def test_latest_valuation_at_separates_method_streams(repo):
 
 
 def test_latest_valuation_at_separates_scenario_streams(repo):
-    security_id = "security:SCENARIO"
+    security_id = "security:test:scenario"
 
     base = valuation(
         "base",
@@ -410,7 +410,7 @@ def test_valuation_at_fails_closed_on_future_anchor_integrity_failure(repo):
 
 
 def test_latest_valuation_at_fails_closed_on_latest_as_of_tie(repo):
-    security_id = "security:TIE"
+    security_id = "security:test:tie"
 
     first = valuation(
         "tie-first",
@@ -439,7 +439,7 @@ def test_latest_valuation_at_fails_closed_on_latest_as_of_tie(repo):
 
 
 def test_latest_valuation_at_does_not_look_ahead_into_future_integrity(repo):
-    security_id = "security:NO-LOOK-AHEAD"
+    security_id = "security:test:no-look-ahead"
 
     visible = valuation(
         "no-look-ahead-visible",
@@ -484,7 +484,7 @@ def test_latest_valuation_at_does_not_look_ahead_into_future_integrity(repo):
 
 
 def test_latest_valuation_at_fails_closed_on_selected_anchor_integrity(repo):
-    security_id = "security:SELECTED-INTEGRITY"
+    security_id = "security:test:selected-integrity"
 
     selected = valuation(
         "selected-integrity",

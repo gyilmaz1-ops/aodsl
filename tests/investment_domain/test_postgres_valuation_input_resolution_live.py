@@ -34,7 +34,7 @@ def utc(year, month, day, hour=0):
 
 def valuation(seed: str = "resolution") -> Valuation:
     payload = {
-        "security_id": "security:NVDA",
+        "security_id": "security:nasdaq:nvda",
         "method": "DCF",
         "value": Decimal("200"),
         "currency": "USD",

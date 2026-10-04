@@ -455,10 +455,14 @@ def validate_node(node) -> None:
             )
 
     if isinstance(node, Valuation):
-        if not node.security_id.startswith("security:"):
+        if re.fullmatch(
+            r"security:[a-z0-9._](?:[a-z0-9._-]*[a-z0-9._])?:"
+            r"[a-z0-9._](?:[a-z0-9._-]*[a-z0-9._])?",
+            node.security_id,
+        ) is None:
             raise DomainValidationError(
                 "IDM-C004",
-                "Valuation.security_id must reference Security",
+                "Valuation.security_id must be a canonical Security identity",
             )
 
         if node.method not in {"DCF", "EV_EBITDA", "PE"}:
