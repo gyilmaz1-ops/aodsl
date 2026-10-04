@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 import os
 
 import pytest
 
+from investment_domain.canonical import canonical_json, canonical_sha256
 from investment_domain.identity import canonical_id
 from investment_domain.nodes import Security
 from investment_domain.postgres_repository import (
@@ -110,3 +112,60 @@ def test_security_read_fails_closed_on_payload_tamper():
                         security.id,
                     ),
                 )
+
+
+def test_security_read_rejects_hash_valid_malformed_payload():
+    r = repo()
+    security = make_security()
+    r.add_security(security)
+
+    payload, _ = r._payload(security)
+    malformed_payload = json.loads(payload)
+    malformed_payload.pop("ticker")
+    malformed_json = canonical_json(malformed_payload)
+    malformed_hash = canonical_sha256(malformed_payload)
+
+    try:
+        with r.connect() as con:
+            with con.transaction():
+                con.execute(
+                    """
+                    UPDATE domain_nodes
+                    SET canonical_payload = %s::jsonb,
+                        payload_hash = %s
+                    WHERE id = %s
+                      AND node_type = 'Security'
+                    """,
+                    (
+                        malformed_json,
+                        malformed_hash,
+                        security.id,
+                    ),
+                )
+
+        with pytest.raises(
+            RepositoryReadError,
+            match="IDM-R553: INVALID_STORED_SECURITY_PAYLOAD",
+        ):
+            r.security(security.id)
+    finally:
+        payload, payload_hash = r._payload(security)
+
+        with r.connect() as con:
+            with con.transaction():
+                con.execute(
+                    """
+                    UPDATE domain_nodes
+                    SET canonical_payload = %s::jsonb,
+                        payload_hash = %s
+                    WHERE id = %s
+                      AND node_type = 'Security'
+                    """,
+                    (
+                        payload,
+                        payload_hash,
+                        security.id,
+                    ),
+                )
+
+    assert r.security(security.id) == security
