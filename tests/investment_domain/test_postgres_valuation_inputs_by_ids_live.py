@@ -266,7 +266,7 @@ def test_missing_dependency_id_fails_closed(repo):
 def test_unsupported_security_dependency_fails_closed(repo):
     node = Security(
         id="security:nasdaq:r554",
-        company_id="company:test:r554-unsupported",
+        company_id="company:test-r554-unsupported",
         venue="NASDAQ",
         ticker="R554",
         currency="USD",

@@ -39,7 +39,7 @@ def utc(year, month, day, hour=0):
 def security(seed: str = "core") -> Security:
     return Security(
         id="security:nasdaq:nvda",
-        company_id=f"company:nvidia:{seed}",
+        company_id=f"company:nvidia-{seed}",
         venue="NASDAQ",
         ticker="NVDA",
         currency="USD",

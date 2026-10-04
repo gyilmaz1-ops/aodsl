@@ -417,6 +417,13 @@ def validate_node(node) -> None:
                 f"{f.name} must not use binary float",
             )
 
+    if isinstance(node, Security):
+        if re.fullmatch(r"company:[a-z0-9._](?:[a-z0-9._-]*[a-z0-9._])?", node.company_id) is None:
+            raise DomainValidationError(
+                "IDM-C004",
+                "Security.company_id must be a canonical Company identity",
+            )
+
     if isinstance(node, Claim):
         if (node.object_value is None) == (node.object_ref is None):
             raise DomainValidationError(
