@@ -211,3 +211,148 @@ def test_claim_at_fails_closed_when_projection_mismatches():
                 (claim.id,),
             )
             cleanup.commit()
+
+def test_claim_at_fails_closed_on_malformed_stored_payload():
+    repo = PostgreSQLEvidenceRepository(DSN)
+    claim = make_claim(
+        "malformed-payload",
+        as_of=datetime(2026, 10, 1, 12, tzinfo=UTC),
+    )
+    repo.add_claim(claim)
+
+    try:
+        with repo.connect() as con:
+            con.execute(
+                "UPDATE domain_nodes "
+                "SET canonical_payload = canonical_payload - 'created_by' "
+                "WHERE id = %s",
+                (claim.id,),
+            )
+            con.commit()
+
+        with pytest.raises(
+            RepositoryReadError,
+            match=r"IDM-R504: INVALID_STORED_CLAIM_PAYLOAD",
+        ):
+            repo.claim_at(
+                claim.id,
+                datetime(2026, 10, 4, 12, tzinfo=UTC),
+            )
+    finally:
+        with repo.connect() as con:
+            con.execute(
+                "DELETE FROM claim_facts WHERE node_id = %s",
+                (claim.id,),
+            )
+            con.execute(
+                "DELETE FROM domain_nodes WHERE id = %s",
+                (claim.id,),
+            )
+            con.commit()
+
+
+def test_claim_at_fails_closed_on_stored_integrity_mismatch():
+    repo = PostgreSQLEvidenceRepository(DSN)
+    claim = make_claim(
+        "integrity-mismatch",
+        as_of=datetime(2026, 10, 1, 12, tzinfo=UTC),
+    )
+    repo.add_claim(claim)
+
+    try:
+        with repo.connect() as con:
+            con.execute(
+                "UPDATE domain_nodes "
+                "SET canonical_payload = "
+                "jsonb_set(canonical_payload, '{created_by}', "
+                "'\"Corrupted_Agent\"'::jsonb) "
+                "WHERE id = %s",
+                (claim.id,),
+            )
+            con.commit()
+
+        with pytest.raises(
+            RepositoryReadError,
+            match=r"IDM-R505: STORED_NODE_INTEGRITY_FAILURE",
+        ):
+            repo.claim_at(
+                claim.id,
+                datetime(2026, 10, 4, 12, tzinfo=UTC),
+            )
+    finally:
+        with repo.connect() as con:
+            con.execute(
+                "DELETE FROM claim_facts WHERE node_id = %s",
+                (claim.id,),
+            )
+            con.execute(
+                "DELETE FROM domain_nodes WHERE id = %s",
+                (claim.id,),
+            )
+            con.commit()
+
+def test_claim_at_rejects_naive_research_cutoff():
+    repo = PostgreSQLEvidenceRepository(DSN)
+
+    with pytest.raises(
+        ValueError,
+        match=r"research_cutoff must be timezone-aware",
+    ):
+        repo.claim_at(
+            "claim:0000000000000000000000000000000000000000000000000000000000000000",
+            datetime(2026, 10, 4, 12),
+        )
+
+
+def test_claim_at_rejects_non_claim_identifier():
+    repo = PostgreSQLEvidenceRepository(DSN)
+
+    with pytest.raises(
+        ValueError,
+        match=r"claim_id must reference Claim",
+    ):
+        repo.claim_at(
+            "evidence:0000000000000000000000000000000000000000000000000000000000000000",
+            datetime(2026, 10, 4, 12, tzinfo=UTC),
+        )
+
+def test_claim_at_fails_closed_on_wrong_stored_node_type():
+    repo = PostgreSQLEvidenceRepository(DSN)
+    claim_id = "claim:" + ("f" * 64)
+
+    try:
+        with repo.connect() as con:
+            con.execute(
+                """
+                INSERT INTO domain_nodes (
+                    id,
+                    node_type,
+                    canonical_payload,
+                    payload_hash
+                )
+                VALUES (
+                    %s,
+                    'Evidence',
+                    '{}'::jsonb,
+                    %s
+                )
+                """,
+                (claim_id, "0" * 64),
+            )
+            con.commit()
+
+        with pytest.raises(
+            RepositoryReadError,
+            match=r"IDM-R502: CLAIM_TYPE_MISMATCH",
+        ):
+            repo.claim_at(
+                claim_id,
+                datetime(2026, 10, 4, 12, tzinfo=UTC),
+            )
+    finally:
+        with repo.connect() as con:
+            con.execute(
+                "DELETE FROM domain_nodes WHERE id = %s",
+                (claim_id,),
+            )
+            con.commit()

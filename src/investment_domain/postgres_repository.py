@@ -7359,20 +7359,27 @@ class PostgreSQLEvidenceRepository:
                 )
 
             claim_payload = claim_row[1]
-            claim = Claim(
-                id=claim_id,
-                subject_id=claim_payload["subject_id"],
-                predicate=claim_payload["predicate"],
-                as_of=self._parse_payload_datetime(
-                    claim_payload["as_of"]
-                ),
-                created_by=claim_payload["created_by"],
-                object_value=claim_payload.get("object_value"),
-                object_ref=claim_payload.get("object_ref"),
-                polarity=claim_payload["polarity"],
-                scope=claim_payload["scope"],
-            )
-            validate_node(claim)
+            try:
+                claim = Claim(
+                    id=claim_id,
+                    subject_id=claim_payload["subject_id"],
+                    predicate=claim_payload["predicate"],
+                    as_of=self._parse_payload_datetime(
+                        claim_payload["as_of"]
+                    ),
+                    created_by=claim_payload["created_by"],
+                    object_value=claim_payload.get("object_value"),
+                    object_ref=claim_payload.get("object_ref"),
+                    polarity=claim_payload["polarity"],
+                    scope=claim_payload["scope"],
+                )
+                validate_node(claim)
+            except RepositoryReadError:
+                raise
+            except (KeyError, TypeError, ValueError) as exc:
+                raise RepositoryReadError(
+                    "IDM-R504: INVALID_STORED_CLAIM_PAYLOAD"
+                ) from exc
             self._assert_stored_node_integrity(
                 node=claim,
                 stored_payload=claim_payload,
