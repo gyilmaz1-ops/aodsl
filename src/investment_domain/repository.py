@@ -44,6 +44,20 @@ class EvidenceRepository(Protocol):
     ) -> None:
         ...
 
+    def evidence_at(
+        self,
+        evidence_id: str,
+        research_cutoff: datetime,
+    ) -> Evidence | None:
+        ...
+
+    def latest_evidence_at(
+        self,
+        evidence_id: str,
+        research_cutoff: datetime,
+    ) -> Evidence | None:
+        ...
+
     def add_evidence(
         self,
         evidence: Evidence,

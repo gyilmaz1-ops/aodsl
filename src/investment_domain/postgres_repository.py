@@ -5392,6 +5392,219 @@ class PostgreSQLEvidenceRepository:
                 "IDM-W515: REVISION_BRANCH_FORBIDDEN"
             )
 
+    def evidence_at(
+        self,
+        evidence_id: str,
+        research_cutoff: datetime,
+    ) -> Evidence | None:
+        if not is_canonical_content_id(evidence_id, kind="evidence"):
+            raise ValueError(
+                "evidence_id must be a canonical Evidence ID"
+            )
+        if (
+            research_cutoff.tzinfo is None
+            or research_cutoff.utcoffset() is None
+        ):
+            raise ValueError(
+                "research_cutoff must be timezone-aware"
+            )
+
+        with self.connect() as con:
+            anchor_row = con.execute(
+                """
+                SELECT node_type, canonical_payload, payload_hash
+                FROM domain_nodes
+                WHERE id = %s
+                """,
+                (evidence_id,),
+            ).fetchone()
+
+            if anchor_row is None:
+                return None
+
+            if str(anchor_row[0]) != NodeType.EVIDENCE.value:
+                raise RepositoryReadError(
+                    "IDM-R588: EVIDENCE_TYPE_MISMATCH"
+                )
+
+            row = con.execute(
+                """
+                SELECT
+                    node_type,
+                    source_id,
+                    source_version,
+                    content_hash,
+                    effective_at,
+                    observed_at,
+                    published_at,
+                    ingested_at,
+                    supersedes_id,
+                    source_uri
+                FROM evidence_facts
+                WHERE node_id = %s
+                """,
+                (evidence_id,),
+            ).fetchone()
+
+            if row is None:
+                raise RepositoryReadError(
+                    "IDM-R591: EVIDENCE_PROJECTION_NOT_FOUND"
+                )
+
+            if str(row[0]) != NodeType.EVIDENCE.value:
+                raise RepositoryReadError(
+                    "IDM-R588: EVIDENCE_TYPE_MISMATCH"
+                )
+
+            try:
+                evidence = Evidence(
+                    id=evidence_id,
+                    source_id=row[1],
+                    source_version=row[2],
+                    content_hash=row[3],
+                    effective_at=row[4],
+                    observed_at=row[5],
+                    published_at=row[6],
+                    ingested_at=row[7],
+                    supersedes_id=row[8],
+                    source_uri=row[9],
+                )
+                validate_node(evidence)
+            except Exception as exc:
+                if exc.__class__.__name__ != "DomainValidationError":
+                    raise
+                raise RepositoryReadError(
+                    "IDM-R589: INVALID_STORED_EVIDENCE"
+                ) from exc
+
+            try:
+                self._assert_stored_node_integrity(
+                    node=evidence,
+                    stored_payload=anchor_row[1],
+                    stored_hash=anchor_row[2],
+                )
+            except RepositoryReadError as exc:
+                raise RepositoryReadError(
+                    "IDM-R590: EVIDENCE_INTEGRITY_FAILURE"
+                ) from exc
+
+            if (
+                evidence.published_at > research_cutoff
+                or evidence.ingested_at > research_cutoff
+            ):
+                return None
+
+            return evidence
+
+
+    def latest_evidence_at(
+        self,
+        evidence_id: str,
+        research_cutoff: datetime,
+    ) -> Evidence | None:
+        if not is_canonical_content_id(
+            evidence_id,
+            kind="evidence",
+        ):
+            raise ValueError(
+                "evidence_id must be a canonical Evidence ID"
+            )
+
+        if (
+            research_cutoff.tzinfo is None
+            or research_cutoff.utcoffset() is None
+        ):
+            raise ValueError(
+                "research_cutoff must be timezone-aware"
+            )
+
+        with self.connect() as con:
+            anchor = con.execute(
+                """
+                SELECT supersedes_id
+                FROM evidence_facts
+                WHERE node_id = %s
+                """,
+                (evidence_id,),
+            ).fetchone()
+
+            if anchor is None:
+                return None
+
+            root_id = evidence_id
+            predecessor_id = anchor[0]
+            visited = {root_id}
+
+            while predecessor_id is not None:
+                if predecessor_id in visited:
+                    raise RepositoryReadError(
+                        "IDM-R592: EVIDENCE_PIT_AMBIGUITY"
+                    )
+
+                visited.add(predecessor_id)
+                root_id = predecessor_id
+
+                predecessor = con.execute(
+                    """
+                    SELECT supersedes_id
+                    FROM evidence_facts
+                    WHERE node_id = %s
+                    """,
+                    (root_id,),
+                ).fetchone()
+
+                if predecessor is None:
+                    raise RepositoryReadError(
+                        "IDM-R592: EVIDENCE_PIT_AMBIGUITY"
+                    )
+
+                predecessor_id = predecessor[0]
+
+            chain_ids = []
+            current_id = root_id
+            visited = set()
+
+            while True:
+                if current_id in visited:
+                    raise RepositoryReadError(
+                        "IDM-R592: EVIDENCE_PIT_AMBIGUITY"
+                    )
+
+                visited.add(current_id)
+                chain_ids.append(current_id)
+
+                successors = con.execute(
+                    """
+                    SELECT node_id
+                    FROM evidence_facts
+                    WHERE supersedes_id = %s
+                    ORDER BY node_id
+                    """,
+                    (current_id,),
+                ).fetchall()
+
+                if not successors:
+                    break
+
+                if len(successors) != 1:
+                    raise RepositoryReadError(
+                        "IDM-R592: EVIDENCE_PIT_AMBIGUITY"
+                    )
+
+                current_id = successors[0][0]
+
+        latest = None
+
+        for candidate_id in chain_ids:
+            candidate = self.evidence_at(
+                candidate_id,
+                research_cutoff,
+            )
+            if candidate is not None:
+                latest = candidate
+
+        return latest
+
     def add_evidence(self, evidence: Evidence) -> None:
         validate_node(evidence)
 
