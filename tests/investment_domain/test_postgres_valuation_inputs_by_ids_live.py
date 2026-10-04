@@ -65,7 +65,7 @@ def catalyst_impact(seed: str, *, as_of=None) -> CatalystImpact:
 
 def metric(seed: str, *, published_at=None, ingested_at=None) -> Metric:
     values = {
-        "subject_id": f"company:test:{seed}",
+        "subject_id": f"company:test-{seed}",
         "name": "financial.free_cash_flow",
         "period_start": utc(2026, 1, 1),
         "period_end": utc(2026, 12, 31),
@@ -140,7 +140,7 @@ def repo():
 
 def estimate(seed: str, *, as_of=None) -> Estimate:
     values = {
-        "subject_id": f"company:test:{seed}",
+        "subject_id": f"company:test-{seed}",
         "metric_name": "financial.free_cash_flow",
         "period_end": utc(2027, 12, 31),
         "value": Decimal("100"),

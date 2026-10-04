@@ -72,7 +72,7 @@ def revenue_metric(**overrides):
 
 def price_metric(**overrides):
     values = {
-        "subject_id": "security:acme-common",
+        "subject_id": "security:nasdaq:acme-common",
         "name": "market.price",
         "value": Decimal("217.3400"),
         "unit": "currency",

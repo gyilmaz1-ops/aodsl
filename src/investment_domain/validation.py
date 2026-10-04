@@ -107,13 +107,23 @@ def _validate_temporal(node) -> None:
                 f"{definition.subject_type.value}",
             )
 
+        subject_pattern = {
+            NodeType.COMPANY: (
+                r"company:[a-z0-9._](?:[a-z0-9._-]*[a-z0-9._])?"
+            ),
+            NodeType.SECURITY: (
+                r"security:[a-z0-9._](?:[a-z0-9._-]*[a-z0-9._])?:"
+                r"[a-z0-9._](?:[a-z0-9._-]*[a-z0-9._])?"
+            ),
+        }.get(definition.subject_type)
+
         if (
-            not node.subject_id.startswith(expected_prefix)
-            or len(node.subject_id) == len(expected_prefix)
+            subject_pattern is None
+            or re.fullmatch(subject_pattern, node.subject_id) is None
         ):
             raise DomainValidationError(
                 "IDM-C004",
-                "Estimate.subject_id must reference "
+                "Estimate.subject_id must reference canonical "
                 f"{definition.subject_type.value}",
             )
 
@@ -177,13 +187,24 @@ def _validate_temporal(node) -> None:
                 "IDM-C004",
                 f"unsupported Metric subject type: {definition.subject_type.value}",
             )
+        subject_pattern = {
+            NodeType.COMPANY: (
+                r"company:[a-z0-9._](?:[a-z0-9._-]*[a-z0-9._])?"
+            ),
+            NodeType.SECURITY: (
+                r"security:[a-z0-9._](?:[a-z0-9._-]*[a-z0-9._])?:"
+                r"[a-z0-9._](?:[a-z0-9._-]*[a-z0-9._])?"
+            ),
+        }.get(definition.subject_type)
+
         if (
-            not node.subject_id.startswith(expected_prefix)
-            or len(node.subject_id) == len(expected_prefix)
+            subject_pattern is None
+            or re.fullmatch(subject_pattern, node.subject_id) is None
         ):
             raise DomainValidationError(
                 "IDM-C004",
-                f"Metric.subject_id must reference {definition.subject_type.value}",
+                "Metric.subject_id must reference canonical "
+                f"{definition.subject_type.value}",
             )
 
         if node.unit != definition.unit:

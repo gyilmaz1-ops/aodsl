@@ -62,7 +62,7 @@ def test_financial_revenue_accepts_company_subject():
 
 
 def test_financial_revenue_rejects_security_subject():
-    node = metric(subject_id="security:nvda")
+    node = metric(subject_id="security:nasdaq:nvda")
 
     with pytest.raises(DomainValidationError):
         validate_node(node)
@@ -71,7 +71,7 @@ def test_financial_revenue_rejects_security_subject():
 def test_market_price_accepts_security_subject():
     validate_node(
         metric(
-            subject_id="security:nvda",
+            subject_id="security:nasdaq:nvda",
             name="market.price",
             period_start=None,
         )
@@ -130,7 +130,7 @@ def test_financial_revenue_requires_duration_period():
 
 def test_market_price_requires_instant_period():
     node = metric(
-        subject_id="security:nvda",
+        subject_id="security:nasdaq:nvda",
         name="market.price",
     )
 

@@ -79,7 +79,7 @@ def provenance_metric(
     value: str,
 ) -> Metric:
     values = {
-        "subject_id": f"company:provenance:{seed}",
+        "subject_id": f"company:provenance-{seed}",
         "name": "financial.revenue",
         "value": Decimal(value),
         "unit": "currency",
