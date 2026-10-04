@@ -280,3 +280,181 @@ def test_latest_estimate_at_does_not_integrity_traverse_future_revision(repo):
         visible.model_version,
         utc(2026, 10, 1, 12),
     ) == visible
+
+
+def test_estimate_at_fails_closed_on_invalid_stored_estimate(repo):
+    node = estimate(
+        "invalid-stored-estimate",
+        as_of=utc(2026, 10, 1, 10),
+    )
+    repo.add_estimate(node)
+
+    with repo.connect() as con:
+        with con.transaction():
+            con.execute(
+                """
+                UPDATE estimate_facts
+                SET metric_name = %s
+                WHERE node_id = %s
+                """,
+                ("__corrupt_metric__", node.id),
+            )
+
+    with pytest.raises(
+        RepositoryReadError,
+        match="IDM-R584: INVALID_STORED_ESTIMATE",
+    ):
+        repo.estimate_at(
+            node.id,
+            utc(2026, 10, 1, 12),
+        )
+
+
+def test_estimate_at_fails_closed_when_projection_is_missing(repo):
+    node = estimate(
+        "missing-projection",
+        as_of=utc(2026, 10, 1, 10),
+    )
+    repo.add_estimate(node)
+
+    with repo.connect() as con:
+        with con.transaction():
+            con.execute(
+                """
+                DELETE FROM estimate_facts
+                WHERE node_id = %s
+                """,
+                (node.id,),
+            )
+
+    with pytest.raises(
+        RepositoryReadError,
+        match="IDM-R586: ESTIMATE_PROJECTION_NOT_FOUND",
+    ):
+        repo.estimate_at(
+            node.id,
+            utc(2026, 10, 1, 12),
+        )
+
+
+def test_estimate_at_fails_closed_on_wrong_anchor_type(repo):
+    node = estimate(
+        "wrong-anchor-type",
+        as_of=utc(2026, 10, 1, 10),
+    )
+    repo.add_estimate(node)
+
+    with repo.connect() as con:
+        with con.transaction():
+            con.execute(
+                """
+                ALTER TABLE estimate_facts
+                DROP CONSTRAINT estimate_domain_node_fk
+                """
+            )
+            con.execute(
+                """
+                UPDATE domain_nodes
+                SET node_type = 'Claim'
+                WHERE id = %s
+                """,
+                (node.id,),
+            )
+
+    try:
+        with pytest.raises(
+            RepositoryReadError,
+            match="IDM-R583: ESTIMATE_TYPE_MISMATCH",
+        ):
+            repo.estimate_at(
+                node.id,
+                utc(2026, 10, 1, 12),
+            )
+    finally:
+        with repo.connect() as con:
+            with con.transaction():
+                con.execute(
+                    """
+                    UPDATE domain_nodes
+                    SET node_type = 'Estimate'
+                    WHERE id = %s
+                    """,
+                    (node.id,),
+                )
+                con.execute(
+                    """
+                    ALTER TABLE estimate_facts
+                    ADD CONSTRAINT estimate_domain_node_fk
+                    FOREIGN KEY (node_id, node_type)
+                    REFERENCES domain_nodes(id, node_type)
+                    ON DELETE RESTRICT
+                    """
+                )
+
+
+def test_estimate_at_fails_closed_on_wrong_projection_type(repo):
+    node = estimate(
+        "wrong-projection-type",
+        as_of=utc(2026, 10, 1, 10),
+    )
+    repo.add_estimate(node)
+
+    with repo.connect() as con:
+        with con.transaction():
+            con.execute(
+                """
+                ALTER TABLE estimate_facts
+                DROP CONSTRAINT estimate_node_type
+                """
+            )
+            con.execute(
+                """
+                ALTER TABLE estimate_facts
+                DROP CONSTRAINT estimate_domain_node_fk
+                """
+            )
+            con.execute(
+                """
+                UPDATE estimate_facts
+                SET node_type = 'Claim'
+                WHERE node_id = %s
+                """,
+                (node.id,),
+            )
+
+    try:
+        with pytest.raises(
+            RepositoryReadError,
+            match="IDM-R583: ESTIMATE_TYPE_MISMATCH",
+        ):
+            repo.estimate_at(
+                node.id,
+                utc(2026, 10, 1, 12),
+            )
+    finally:
+        with repo.connect() as con:
+            with con.transaction():
+                con.execute(
+                    """
+                    UPDATE estimate_facts
+                    SET node_type = 'Estimate'
+                    WHERE node_id = %s
+                    """,
+                    (node.id,),
+                )
+                con.execute(
+                    """
+                    ALTER TABLE estimate_facts
+                    ADD CONSTRAINT estimate_node_type
+                    CHECK (node_type = 'Estimate')
+                    """
+                )
+                con.execute(
+                    """
+                    ALTER TABLE estimate_facts
+                    ADD CONSTRAINT estimate_domain_node_fk
+                    FOREIGN KEY (node_id, node_type)
+                    REFERENCES domain_nodes(id, node_type)
+                    ON DELETE RESTRICT
+                    """
+                )
