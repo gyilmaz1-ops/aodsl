@@ -272,6 +272,59 @@ def test_missing_valuation_fails_closed(repo):
         )
 
 
+def test_valuation_inputs_at_rejects_wrong_valuation_anchor_type(repo):
+    node = valuation("r546-public-regression")
+    repo.add_valuation(node)
+
+    try:
+        with repo.connect() as con:
+            with con.transaction():
+                con.execute(
+                    """
+                    ALTER TABLE valuation_facts
+                    DROP CONSTRAINT valuation_domain_node_fk
+                    """
+                )
+                con.execute(
+                    """
+                    UPDATE domain_nodes
+                    SET node_type = 'Claim'
+                    WHERE id = %s
+                    """,
+                    (node.id,),
+                )
+
+        with pytest.raises(
+            RepositoryReadError,
+            match="IDM-R546: VALUATION_TYPE_MISMATCH",
+        ):
+            repo.valuation_inputs_at(
+                node.id,
+                utc(2026, 9, 30, 12),
+            )
+
+    finally:
+        with repo.connect() as con:
+            with con.transaction():
+                con.execute(
+                    """
+                    UPDATE domain_nodes
+                    SET node_type = 'Valuation'
+                    WHERE id = %s
+                    """,
+                    (node.id,),
+                )
+                con.execute(
+                    """
+                    ALTER TABLE valuation_facts
+                    ADD CONSTRAINT valuation_domain_node_fk
+                    FOREIGN KEY (node_id, node_type)
+                    REFERENCES domain_nodes(id, node_type)
+                    ON DELETE RESTRICT
+                    """
+                )
+
+
 def test_naive_research_cutoff_is_rejected(repo):
     node_valuation, _, _ = persist_dependency_graph(repo)
 
