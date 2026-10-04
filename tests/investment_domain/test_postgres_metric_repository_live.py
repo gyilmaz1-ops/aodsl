@@ -228,7 +228,7 @@ def test_instant_metric_preserves_null_period_start(repo):
 # MP013 was superseded by IDM-005E Metric revision enforcement.
 def test_supersedes_id_requires_existing_revision_predecessor(repo):
     metric = revenue_metric(
-        supersedes_id="metric:not-present-in-database",
+        supersedes_id="metric:" + "f" * 64,
     )
 
     with pytest.raises(

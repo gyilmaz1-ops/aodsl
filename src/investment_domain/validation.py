@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 from .edges import ALLOWED_EDGES, Edge
-from .identity import canonical_id
+from .identity import canonical_id, is_canonical_content_id
 from .metrics import MetricPeriodKind, metric_definition
 from .nodes import (
     Calculation,
@@ -79,7 +79,7 @@ def _validate_temporal(node) -> None:
                 "Evidence.ingested_at precedes published_at",
             )
         if node.supersedes_id is not None:
-            if not node.supersedes_id.startswith("evidence:"):
+            if not is_canonical_content_id(node.supersedes_id, kind="evidence"):
                 raise DomainValidationError(
                     "IDM-C004",
                     "Evidence.supersedes_id must reference Evidence",
@@ -255,7 +255,7 @@ def _validate_temporal(node) -> None:
                 "Metric.ingested_at precedes published_at",
             )
         if node.supersedes_id is not None:
-            if not node.supersedes_id.startswith("metric:"):
+            if not is_canonical_content_id(node.supersedes_id, kind="metric"):
                 raise DomainValidationError(
                     "IDM-C004",
                     "Metric.supersedes_id must reference Metric",
