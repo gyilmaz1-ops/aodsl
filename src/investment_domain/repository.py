@@ -38,6 +38,13 @@ class EvidenceRepository(Protocol):
     ) -> Security | None:
         ...
 
+    def claim_at(
+        self,
+        claim_id: str,
+        research_cutoff: datetime,
+    ) -> Claim | None:
+        ...
+
     def add_claim(
         self,
         claim: Claim,

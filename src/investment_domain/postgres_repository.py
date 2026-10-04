@@ -7316,6 +7316,114 @@ class PostgreSQLEvidenceRepository:
                 research_cutoff,
             )
 
+    def claim_at(
+        self,
+        claim_id: str,
+        research_cutoff: datetime,
+    ) -> Claim | None:
+        if (
+            research_cutoff.tzinfo is None
+            or research_cutoff.utcoffset() is None
+        ):
+            raise ValueError(
+                "research_cutoff must be timezone-aware"
+            )
+
+        if (
+            not isinstance(claim_id, str)
+            or not claim_id.startswith("claim:")
+        ):
+            raise ValueError(
+                "claim_id must reference Claim"
+            )
+
+        with self.connect() as con:
+            claim_row = con.execute(
+                """
+                SELECT
+                    n.node_type,
+                    n.canonical_payload,
+                    n.payload_hash
+                FROM domain_nodes AS n
+                WHERE n.id = %s
+                """,
+                (claim_id,),
+            ).fetchone()
+
+            if claim_row is None:
+                return None
+
+            if str(claim_row[0]) != NodeType.CLAIM.value:
+                raise RepositoryReadError(
+                    "IDM-R502: CLAIM_TYPE_MISMATCH"
+                )
+
+            claim_payload = claim_row[1]
+            claim = Claim(
+                id=claim_id,
+                subject_id=claim_payload["subject_id"],
+                predicate=claim_payload["predicate"],
+                as_of=self._parse_payload_datetime(
+                    claim_payload["as_of"]
+                ),
+                created_by=claim_payload["created_by"],
+                object_value=claim_payload.get("object_value"),
+                object_ref=claim_payload.get("object_ref"),
+                polarity=claim_payload["polarity"],
+                scope=claim_payload["scope"],
+            )
+            validate_node(claim)
+            self._assert_stored_node_integrity(
+                node=claim,
+                stored_payload=claim_payload,
+                stored_hash=claim_row[2],
+            )
+
+            projection_row = con.execute(
+                """
+                SELECT
+                    node_type,
+                    subject_id,
+                    predicate,
+                    as_of,
+                    polarity,
+                    scope
+                FROM claim_facts
+                WHERE node_id = %s
+                """,
+                (claim_id,),
+            ).fetchone()
+
+            if projection_row is None:
+                raise RepositoryReadError(
+                    "IDM-R593: CLAIM_PROJECTION_NOT_FOUND"
+                )
+
+            expected_projection = (
+                claim.node_type.value,
+                claim.subject_id,
+                claim.predicate,
+                claim.as_of,
+                claim.polarity,
+                claim.scope,
+            )
+
+            actual_projection = (
+                str(projection_row[0]),
+                projection_row[1],
+                projection_row[2],
+                projection_row[3],
+                projection_row[4],
+                projection_row[5],
+            )
+
+            if actual_projection != expected_projection:
+                raise RepositoryReadError(
+                    "IDM-R594: CLAIM_PROJECTION_MISMATCH"
+                )
+
+            return claim
+
     def evidence_for_claim_at(
         self,
         claim_id,
