@@ -690,6 +690,29 @@ def test_valuation_inputs_at_rejects_calculation_with_future_transitive_provenan
         )
 
 
+def test_valuation_inputs_at_rejects_missing_valuation_projection(
+    repo,
+):
+    node = valuation("r547-public-regression")
+    repo.add_valuation(node)
+
+    with repo.connect() as con:
+        with con.transaction():
+            con.execute(
+                "DELETE FROM valuation_facts WHERE node_id = %s",
+                (node.id,),
+            )
+
+    with pytest.raises(
+        RepositoryReadError,
+        match="IDM-R547: VALUATION_PROJECTION_NOT_FOUND",
+    ):
+        repo.valuation_inputs_at(
+            node.id,
+            utc(2026, 9, 30, 12),
+        )
+
+
 def test_valuation_inputs_at_rejects_valuation_canonical_anchor_tampering(
     repo,
 ):
