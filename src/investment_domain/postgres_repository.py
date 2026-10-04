@@ -1077,6 +1077,156 @@ class PostgreSQLEvidenceRepository:
                         "IDM-W541: CATALYST_PROJECTION_WRITE_LOST"
                     )
 
+
+    def catalyst_at(
+        self,
+        catalyst_id: str,
+        research_cutoff: datetime,
+    ) -> Catalyst | None:
+        if not is_canonical_content_id(
+            catalyst_id,
+            kind="catalyst",
+        ):
+            raise ValueError(
+                "catalyst_id must be a canonical Catalyst ID"
+            )
+
+        if (
+            research_cutoff.tzinfo is None
+            or research_cutoff.utcoffset() is None
+        ):
+            raise ValueError(
+                "research_cutoff must be timezone-aware"
+            )
+
+        with self.connect() as con:
+            anchor_row = con.execute(
+                """
+                SELECT
+                    node_type,
+                    canonical_payload,
+                    payload_hash
+                FROM domain_nodes
+                WHERE id = %s
+                """,
+                (catalyst_id,),
+            ).fetchone()
+
+            if anchor_row is None:
+                return None
+
+            if str(anchor_row[0]) != NodeType.CATALYST.value:
+                raise RepositoryReadError(
+                    "IDM-R578: CATALYST_TYPE_MISMATCH"
+                )
+
+            row = con.execute(
+                """
+                SELECT
+                    node_type,
+                    subject_id,
+                    description,
+                    as_of,
+                    expected_at
+                FROM catalyst_facts
+                WHERE node_id = %s
+                """,
+                (catalyst_id,),
+            ).fetchone()
+
+            if row is None:
+                raise RepositoryReadError(
+                    "IDM-R581: CATALYST_PROJECTION_NOT_FOUND"
+                )
+
+            if str(row[0]) != NodeType.CATALYST.value:
+                raise RepositoryReadError(
+                    "IDM-R578: CATALYST_TYPE_MISMATCH"
+                )
+
+            try:
+                catalyst = Catalyst(
+                    id=catalyst_id,
+                    subject_id=str(row[1]),
+                    description=str(row[2]),
+                    as_of=row[3],
+                    expected_at=row[4],
+                )
+                validate_node(catalyst)
+            except (TypeError, ValueError) as exc:
+                raise RepositoryReadError(
+                    "IDM-R579: INVALID_STORED_CATALYST"
+                ) from exc
+
+            payload, payload_hash = self._payload(catalyst)
+
+            if (
+                anchor_row[1] != json.loads(payload)
+                or str(anchor_row[2]) != payload_hash
+            ):
+                raise RepositoryReadError(
+                    "IDM-R580: CATALYST_INTEGRITY_FAILURE"
+                )
+
+            if catalyst.as_of > research_cutoff:
+                return None
+
+            return catalyst
+
+
+    def latest_catalyst_at(
+        self,
+        subject_id: str,
+        research_cutoff: datetime,
+    ) -> Catalyst | None:
+        if not isinstance(subject_id, str) or not subject_id.strip():
+            raise ValueError(
+                "subject_id must not be empty"
+            )
+
+        if (
+            research_cutoff.tzinfo is None
+            or research_cutoff.utcoffset() is None
+        ):
+            raise ValueError(
+                "research_cutoff must be timezone-aware"
+            )
+
+        with self.connect() as con:
+            rows = con.execute(
+                """
+                SELECT node_id
+                FROM catalyst_facts
+                WHERE subject_id = %s
+                  AND as_of = (
+                      SELECT MAX(as_of)
+                      FROM catalyst_facts
+                      WHERE subject_id = %s
+                        AND as_of <= %s
+                  )
+                ORDER BY node_id
+                """,
+                (
+                    subject_id,
+                    subject_id,
+                    research_cutoff,
+                ),
+            ).fetchall()
+
+        if not rows:
+            return None
+
+        if len(rows) != 1:
+            raise RepositoryReadError(
+                "IDM-R582: CATALYST_PIT_AMBIGUITY"
+            )
+
+        return self.catalyst_at(
+            str(rows[0][0]),
+            research_cutoff,
+        )
+
+
     def add_catalyst_impact(
         self,
         catalyst_impact: CatalystImpact,

@@ -89,6 +89,20 @@ class EvidenceRepository(Protocol):
     ) -> None:
         ...
 
+    def catalyst_at(
+        self,
+        catalyst_id: str,
+        research_cutoff: datetime,
+    ) -> Catalyst | None:
+        ...
+
+    def latest_catalyst_at(
+        self,
+        subject_id: str,
+        research_cutoff: datetime,
+    ) -> Catalyst | None:
+        ...
+
     def add_catalyst_impact(
         self,
         catalyst_impact: CatalystImpact,
