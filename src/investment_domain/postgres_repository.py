@@ -1432,6 +1432,162 @@ class PostgreSQLEvidenceRepository:
                         "CATALYST_AFFECTS_SET_MISMATCH"
                     )
 
+    def forecast_at(
+        self,
+        forecast_id: str,
+        research_cutoff: datetime,
+    ) -> Forecast | None:
+        if not is_canonical_content_id(
+            forecast_id,
+            kind="forecast",
+        ):
+            raise ValueError(
+                "forecast_id must be a canonical Forecast ID"
+            )
+
+        if (
+            research_cutoff.tzinfo is None
+            or research_cutoff.utcoffset() is None
+        ):
+            raise ValueError(
+                "research_cutoff must be timezone-aware"
+            )
+
+        with self.connect() as con:
+            anchor_row = con.execute(
+                """
+                SELECT
+                    node_type,
+                    canonical_payload,
+                    payload_hash
+                FROM domain_nodes
+                WHERE id = %s
+                """,
+                (forecast_id,),
+            ).fetchone()
+
+            if anchor_row is None:
+                return None
+
+            if str(anchor_row[0]) != NodeType.FORECAST.value:
+                raise RepositoryReadError(
+                    "IDM-R573: FORECAST_TYPE_MISMATCH"
+                )
+
+            row = con.execute(
+                """
+                SELECT
+                    node_type,
+                    subject_id,
+                    scenario,
+                    as_of,
+                    model_version
+                FROM forecast_facts
+                WHERE node_id = %s
+                """,
+                (forecast_id,),
+            ).fetchone()
+
+            if row is None:
+                raise RepositoryReadError(
+                    "IDM-R576: FORECAST_PROJECTION_NOT_FOUND"
+                )
+
+            if str(row[0]) != NodeType.FORECAST.value:
+                raise RepositoryReadError(
+                    "IDM-R573: FORECAST_TYPE_MISMATCH"
+                )
+
+            try:
+                forecast = Forecast(
+                    id=forecast_id,
+                    subject_id=str(row[1]),
+                    scenario=str(row[2]),
+                    as_of=row[3],
+                    model_version=str(row[4]),
+                )
+                validate_node(forecast)
+            except (TypeError, ValueError) as exc:
+                raise RepositoryReadError(
+                    "IDM-R574: INVALID_STORED_FORECAST"
+                ) from exc
+
+            payload, payload_hash = self._payload(forecast)
+
+            if (
+                anchor_row[1] != json.loads(payload)
+                or str(anchor_row[2]) != payload_hash
+            ):
+                raise RepositoryReadError(
+                    "IDM-R575: FORECAST_INTEGRITY_FAILURE"
+                )
+
+            if forecast.as_of > research_cutoff:
+                return None
+
+            return forecast
+
+    def latest_forecast_at(
+        self,
+        subject_id: str,
+        scenario: str,
+        research_cutoff: datetime,
+    ) -> Forecast | None:
+        if not isinstance(subject_id, str) or not subject_id:
+            raise ValueError(
+                "subject_id must be a non-empty string"
+            )
+
+        if not isinstance(scenario, str) or not scenario:
+            raise ValueError(
+                "scenario must be a non-empty string"
+            )
+
+        if (
+            research_cutoff.tzinfo is None
+            or research_cutoff.utcoffset() is None
+        ):
+            raise ValueError(
+                "research_cutoff must be timezone-aware"
+            )
+
+        with self.connect() as con:
+            rows = con.execute(
+                """
+                SELECT node_id
+                FROM forecast_facts
+                WHERE subject_id = %s
+                  AND scenario = %s
+                  AND as_of = (
+                      SELECT MAX(as_of)
+                      FROM forecast_facts
+                      WHERE subject_id = %s
+                        AND scenario = %s
+                        AND as_of <= %s
+                  )
+                """,
+                (
+                    subject_id,
+                    scenario,
+                    subject_id,
+                    scenario,
+                    research_cutoff,
+                ),
+            ).fetchall()
+
+        if not rows:
+            return None
+
+        if len(rows) > 1:
+            raise RepositoryReadError(
+                "IDM-R577: FORECAST_PIT_AMBIGUITY"
+            )
+
+        return self.forecast_at(
+            str(rows[0][0]),
+            research_cutoff,
+        )
+
     def add_forecast(
         self,
         forecast: Forecast,

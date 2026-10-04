@@ -68,6 +68,21 @@ class EvidenceRepository(Protocol):
     ) -> None:
         ...
 
+    def forecast_at(
+        self,
+        forecast_id: str,
+        research_cutoff: datetime,
+    ) -> Forecast | None:
+        ...
+
+    def latest_forecast_at(
+        self,
+        subject_id: str,
+        scenario: str,
+        research_cutoff: datetime,
+    ) -> Forecast | None:
+        ...
+
     def add_catalyst(
         self,
         catalyst: Catalyst,
