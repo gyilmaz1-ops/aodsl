@@ -62,6 +62,24 @@ class EvidenceRepository(Protocol):
     ) -> None:
         ...
 
+    def estimate_at(
+        self,
+        estimate_id: str,
+        research_cutoff: datetime,
+    ) -> Estimate | None:
+        ...
+
+    def latest_estimate_at(
+        self,
+        subject_id: str,
+        metric_name: str,
+        period_end: datetime,
+        scenario: str,
+        model_version: str,
+        research_cutoff: datetime,
+    ) -> Estimate | None:
+        ...
+
     def add_forecast(
         self,
         forecast: Forecast,

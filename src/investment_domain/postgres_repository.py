@@ -3131,6 +3131,199 @@ class PostgreSQLEvidenceRepository:
                 valuation,
             )
 
+    def estimate_at(
+        self,
+        estimate_id: str,
+        research_cutoff: datetime,
+    ) -> Estimate | None:
+        if not is_canonical_content_id(
+            estimate_id,
+            kind="estimate",
+        ):
+            raise ValueError(
+                "estimate_id must be a canonical Estimate ID"
+            )
+
+        if (
+            research_cutoff.tzinfo is None
+            or research_cutoff.utcoffset() is None
+        ):
+            raise ValueError(
+                "research_cutoff must be timezone-aware"
+            )
+
+        with self.connect() as con:
+            anchor_row = con.execute(
+                """
+                SELECT
+                    node_type,
+                    canonical_payload,
+                    payload_hash
+                FROM domain_nodes
+                WHERE id = %s
+                """,
+                (estimate_id,),
+            ).fetchone()
+
+            if anchor_row is None:
+                return None
+
+            if str(anchor_row[0]) != NodeType.ESTIMATE.value:
+                raise RepositoryReadError(
+                    "IDM-R583: ESTIMATE_TYPE_MISMATCH"
+                )
+
+            row = con.execute(
+                """
+                SELECT
+                    node_type,
+                    subject_id,
+                    metric_name,
+                    period_end,
+                    value,
+                    unit,
+                    scenario,
+                    model_version,
+                    as_of,
+                    currency
+                FROM estimate_facts
+                WHERE node_id = %s
+                """,
+                (estimate_id,),
+            ).fetchone()
+
+            if row is None:
+                raise RepositoryReadError(
+                    "IDM-R586: ESTIMATE_PROJECTION_NOT_FOUND"
+                )
+
+            if str(row[0]) != NodeType.ESTIMATE.value:
+                raise RepositoryReadError(
+                    "IDM-R583: ESTIMATE_TYPE_MISMATCH"
+                )
+
+            try:
+                estimate = Estimate(
+                    id=estimate_id,
+                    subject_id=row[1],
+                    metric_name=row[2],
+                    period_end=row[3],
+                    value=row[4],
+                    unit=row[5],
+                    scenario=row[6],
+                    model_version=row[7],
+                    as_of=row[8],
+                    currency=row[9],
+                )
+                validate_node(estimate)
+            except (TypeError, ValueError) as exc:
+                raise RepositoryReadError(
+                    "IDM-R584: INVALID_STORED_ESTIMATE"
+                ) from exc
+
+            payload, payload_hash = self._payload(estimate)
+
+            if (
+                anchor_row[1] != json.loads(payload)
+                or str(anchor_row[2]) != payload_hash
+            ):
+                raise RepositoryReadError(
+                    "IDM-R585: ESTIMATE_INTEGRITY_FAILURE"
+                )
+
+            if estimate.as_of > research_cutoff:
+                return None
+
+            return estimate
+
+
+    def latest_estimate_at(
+        self,
+        subject_id: str,
+        metric_name: str,
+        period_end: datetime,
+        scenario: str,
+        model_version: str,
+        research_cutoff: datetime,
+    ) -> Estimate | None:
+        for name, value in (
+            ("subject_id", subject_id),
+            ("metric_name", metric_name),
+            ("scenario", scenario),
+            ("model_version", model_version),
+        ):
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(
+                    f"{name} must be a non-empty string"
+                )
+
+        if (
+            period_end.tzinfo is None
+            or period_end.utcoffset() is None
+        ):
+            raise ValueError(
+                "period_end must be timezone-aware"
+            )
+
+        if (
+            research_cutoff.tzinfo is None
+            or research_cutoff.utcoffset() is None
+        ):
+            raise ValueError(
+                "research_cutoff must be timezone-aware"
+            )
+
+        with self.connect() as con:
+            rows = con.execute(
+                """
+                SELECT node_id
+                FROM estimate_facts
+                WHERE subject_id = %s
+                  AND metric_name = %s
+                  AND period_end = %s
+                  AND scenario = %s
+                  AND model_version = %s
+                  AND as_of = (
+                      SELECT MAX(as_of)
+                      FROM estimate_facts
+                      WHERE subject_id = %s
+                        AND metric_name = %s
+                        AND period_end = %s
+                        AND scenario = %s
+                        AND model_version = %s
+                        AND as_of <= %s
+                  )
+                ORDER BY node_id
+                """,
+                (
+                    subject_id,
+                    metric_name,
+                    period_end,
+                    scenario,
+                    model_version,
+                    subject_id,
+                    metric_name,
+                    period_end,
+                    scenario,
+                    model_version,
+                    research_cutoff,
+                ),
+            ).fetchall()
+
+        if not rows:
+            return None
+
+        if len(rows) != 1:
+            raise RepositoryReadError(
+                "IDM-R587: ESTIMATE_PIT_AMBIGUITY"
+            )
+
+        return self.estimate_at(
+            str(rows[0][0]),
+            research_cutoff,
+        )
+
+
     def _load_exact_estimate(
         self,
         con,
