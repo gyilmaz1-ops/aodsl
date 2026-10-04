@@ -2541,6 +2541,181 @@ class PostgreSQLEvidenceRepository:
             research_cutoff,
         )
 
+    def valuation_at(
+        self,
+        valuation_id: str,
+        research_cutoff: datetime,
+    ) -> Valuation | None:
+        if not is_canonical_content_id(
+            valuation_id,
+            kind="valuation",
+        ):
+            raise ValueError(
+                "valuation_id must be a canonical Valuation ID"
+            )
+
+        if (
+            research_cutoff.tzinfo is None
+            or research_cutoff.utcoffset() is None
+        ):
+            raise ValueError(
+                "research_cutoff must be timezone-aware"
+            )
+
+        with self.connect() as con:
+            anchor_row = con.execute(
+                """
+                SELECT
+                    node_type,
+                    canonical_payload,
+                    payload_hash
+                FROM domain_nodes
+                WHERE id = %s
+                """,
+                (valuation_id,),
+            ).fetchone()
+
+            if anchor_row is None:
+                return None
+
+            if str(anchor_row[0]) != NodeType.VALUATION.value:
+                raise RepositoryReadError(
+                    "IDM-R568: VALUATION_TYPE_MISMATCH"
+                )
+
+            row = con.execute(
+                """
+                SELECT
+                    node_type,
+                    security_id,
+                    method,
+                    value,
+                    currency,
+                    as_of,
+                    model_version,
+                    scenario
+                FROM valuation_facts
+                WHERE node_id = %s
+                """,
+                (valuation_id,),
+            ).fetchone()
+
+            if row is None:
+                raise RepositoryReadError(
+                    "IDM-R571: VALUATION_PROJECTION_NOT_FOUND"
+                )
+
+            if str(row[0]) != NodeType.VALUATION.value:
+                raise RepositoryReadError(
+                    "IDM-R568: VALUATION_TYPE_MISMATCH"
+                )
+
+            try:
+                valuation = Valuation(
+                    id=valuation_id,
+                    security_id=str(row[1]),
+                    method=str(row[2]),
+                    value=row[3],
+                    currency=str(row[4]),
+                    as_of=row[5],
+                    model_version=str(row[6]),
+                    scenario=str(row[7]),
+                )
+                validate_node(valuation)
+            except (TypeError, ValueError) as exc:
+                raise RepositoryReadError(
+                    "IDM-R569: INVALID_STORED_VALUATION"
+                ) from exc
+
+            payload, payload_hash = self._payload(
+                valuation
+            )
+
+            if (
+                anchor_row[1] != json.loads(payload)
+                or str(anchor_row[2]) != payload_hash
+            ):
+                raise RepositoryReadError(
+                    "IDM-R570: VALUATION_INTEGRITY_FAILURE"
+                )
+
+            if valuation.as_of > research_cutoff:
+                return None
+
+            return valuation
+
+    def latest_valuation_at(
+        self,
+        security_id: str,
+        method: str,
+        scenario: str,
+        research_cutoff: datetime,
+    ) -> Valuation | None:
+        if not isinstance(security_id, str) or not security_id.strip():
+            raise ValueError(
+                "security_id must not be empty"
+            )
+
+        if not isinstance(method, str) or not method.strip():
+            raise ValueError(
+                "method must not be empty"
+            )
+
+        if not isinstance(scenario, str) or not scenario.strip():
+            raise ValueError(
+                "scenario must not be empty"
+            )
+
+        if (
+            research_cutoff.tzinfo is None
+            or research_cutoff.utcoffset() is None
+        ):
+            raise ValueError(
+                "research_cutoff must be timezone-aware"
+            )
+
+        with self.connect() as con:
+            rows = con.execute(
+                """
+                SELECT node_id
+                FROM valuation_facts
+                WHERE security_id = %s
+                  AND method = %s
+                  AND scenario = %s
+                  AND as_of = (
+                      SELECT MAX(as_of)
+                      FROM valuation_facts
+                      WHERE security_id = %s
+                        AND method = %s
+                        AND scenario = %s
+                        AND as_of <= %s
+                  )
+                ORDER BY node_id
+                """,
+                (
+                    security_id,
+                    method,
+                    scenario,
+                    security_id,
+                    method,
+                    scenario,
+                    research_cutoff,
+                ),
+            ).fetchall()
+
+        if not rows:
+            return None
+
+        if len(rows) != 1:
+            raise RepositoryReadError(
+                "IDM-R572: VALUATION_PIT_AMBIGUITY"
+            )
+
+        return self.valuation_at(
+            str(rows[0][0]),
+            research_cutoff,
+        )
+
     def add_valuation(
         self,
         valuation: Valuation,

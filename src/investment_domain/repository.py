@@ -162,6 +162,22 @@ class EvidenceRepository(Protocol):
     ) -> None:
         ...
 
+    def valuation_at(
+        self,
+        valuation_id: str,
+        research_cutoff: datetime,
+    ) -> Valuation | None:
+        ...
+
+    def latest_valuation_at(
+        self,
+        security_id: str,
+        method: str,
+        scenario: str,
+        research_cutoff: datetime,
+    ) -> Valuation | None:
+        ...
+
     def add_valuation_dependencies(
         self,
         valuation_id: str,
