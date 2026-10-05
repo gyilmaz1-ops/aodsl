@@ -158,7 +158,10 @@ def test_corrupt_calculation_canonical_payload_fails_closed(repo):
                 ('{"corrupt":true}', calc.id),
             )
 
-    with pytest.raises(RepositoryReadError):
+    with pytest.raises(
+        RepositoryReadError,
+        match="IDM-R599: CALCULATION_INTEGRITY_FAILURE",
+    ):
         repo.verify_calculation(calc.id)
 
 
@@ -176,7 +179,10 @@ def test_corrupt_calculation_payload_hash_fails_closed(repo):
                 ("0" * 64, calc.id),
             )
 
-    with pytest.raises(RepositoryReadError):
+    with pytest.raises(
+        RepositoryReadError,
+        match="IDM-R599: CALCULATION_INTEGRITY_FAILURE",
+    ):
         repo.verify_calculation(calc.id)
 
 
