@@ -881,3 +881,238 @@ def test_live_v2_to_v3_reversed_edge_fails_closed_atomically():
     # after proving that the v3 migration fails closed atomically.
     # Do not leak that state into subsequent live-test modules.
     reset_database()
+
+
+def test_live_current_history_rejects_missing_physical_constraint():
+    reset_database()
+    manager = PostgreSQLMigrationManager(DSN)
+
+    try:
+        assert manager.migrate() == CURRENT_SCHEMA_VERSION
+
+        with connect() as con:
+            with con.transaction():
+                con.execute(
+                    """
+                    ALTER TABLE risk_facts
+                    DROP CONSTRAINT risk_node_type
+                    """
+                )
+
+        with connect() as con:
+            history = con.execute(
+                f"""
+                SELECT version, name, checksum
+                FROM {MIGRATION_HISTORY_TABLE}
+                ORDER BY version
+                """
+            ).fetchall()
+
+            constraint_count = con.execute(
+                """
+                SELECT COUNT(*)
+                FROM pg_constraint AS c
+                JOIN pg_class AS t
+                  ON t.oid = c.conrelid
+                JOIN pg_namespace AS n
+                  ON n.oid = t.relnamespace
+                WHERE n.nspname = current_schema()
+                  AND t.relname = 'risk_facts'
+                  AND c.conname = 'risk_node_type'
+                """
+            ).fetchone()[0]
+
+        assert len(history) == CURRENT_SCHEMA_VERSION
+        assert [row[0] for row in history] == list(
+            range(1, CURRENT_SCHEMA_VERSION + 1)
+        )
+        assert constraint_count == 0
+
+        with pytest.raises(
+            MigrationError,
+            match="IDM-M411: PHYSICAL_SCHEMA_MISMATCH",
+        ):
+            manager.migrate()
+
+    finally:
+        reset_database()
+        assert manager.migrate() == CURRENT_SCHEMA_VERSION
+
+
+def test_live_current_history_rejects_column_semantic_drift():
+    reset_database()
+    manager = PostgreSQLMigrationManager(DSN)
+    assert manager.migrate() == CURRENT_SCHEMA_VERSION
+
+    try:
+        with connect() as con:
+            con.execute("""
+                ALTER TABLE risk_facts
+                ALTER COLUMN description DROP NOT NULL
+            """)
+            con.commit()
+
+        with pytest.raises(
+            MigrationError,
+            match=r"IDM-M411: PHYSICAL_SCHEMA_MISMATCH",
+        ) as exc_info:
+            manager.migrate()
+
+        message = str(exc_info.value)
+        assert "columns:" in message
+        assert "risk_facts" in message
+        assert "description" in message
+    finally:
+        reset_database()
+        assert (
+            PostgreSQLMigrationManager(DSN).migrate()
+            == CURRENT_SCHEMA_VERSION
+        )
+
+
+def test_live_current_history_rejects_missing_explicit_index():
+    reset_database()
+    manager = PostgreSQLMigrationManager(DSN)
+    assert manager.migrate() == CURRENT_SCHEMA_VERSION
+
+    try:
+        with connect() as con:
+            con.execute("DROP INDEX idx_domain_edges_target")
+            con.commit()
+
+        with pytest.raises(
+            MigrationError,
+            match=r"IDM-M411: PHYSICAL_SCHEMA_MISMATCH",
+        ) as exc_info:
+            manager.migrate()
+
+        message = str(exc_info.value)
+        assert "indexes:" in message
+        assert "idx_domain_edges_target" in message
+    finally:
+        reset_database()
+        assert (
+            PostgreSQLMigrationManager(DSN).migrate()
+            == CURRENT_SCHEMA_VERSION
+        )
+
+
+def test_live_current_history_rejects_unexpected_trigger():
+    reset_database()
+
+    # A trigger disappears when its table is dropped, but its standalone
+    # PostgreSQL function does not. Remove any artifact left by an
+    # interrupted/failed previous run so this regression is repeatable.
+    with connect() as con:
+        con.execute(
+            "DROP FUNCTION IF EXISTS ti10d_probe_trigger_fn()"
+        )
+
+    manager = PostgreSQLMigrationManager(DSN)
+    assert manager.migrate() == CURRENT_SCHEMA_VERSION
+
+    try:
+        with connect() as con:
+            con.execute("""
+                CREATE FUNCTION ti10d_probe_trigger_fn()
+                RETURNS trigger
+                LANGUAGE plpgsql
+                AS $$
+                BEGIN
+                    RETURN NEW;
+                END;
+                $$
+            """)
+            con.execute("""
+                CREATE TRIGGER ti10d_probe_trigger
+                BEFORE INSERT ON risk_facts
+                FOR EACH ROW
+                EXECUTE FUNCTION ti10d_probe_trigger_fn()
+            """)
+
+        with pytest.raises(
+            MigrationError,
+            match=r"IDM-M411: PHYSICAL_SCHEMA_MISMATCH",
+        ) as exc_info:
+            manager.migrate()
+
+        message = str(exc_info.value)
+        assert "triggers:" in message
+        assert "ti10d_probe_trigger" in message
+    finally:
+        reset_database()
+
+        with connect() as con:
+            con.execute(
+                "DROP FUNCTION IF EXISTS ti10d_probe_trigger_fn()"
+            )
+
+        assert (
+            PostgreSQLMigrationManager(DSN).migrate()
+            == CURRENT_SCHEMA_VERSION
+        )
+
+
+def test_live_current_history_ignores_unrelated_physical_schema_objects():
+    reset_database()
+
+    manager = PostgreSQLMigrationManager(DSN)
+    assert manager.migrate() == CURRENT_SCHEMA_VERSION
+
+    function_name = "ti11d_unrelated_trigger_fn"
+
+    try:
+        with connect() as con:
+            con.execute(
+                f"DROP FUNCTION IF EXISTS {function_name}()"
+            )
+            con.execute(
+                """
+                CREATE TABLE unrelated_facts (
+                    id INTEGER PRIMARY KEY,
+                    value INTEGER NOT NULL,
+                    CONSTRAINT unrelated_facts_value_positive
+                        CHECK (value > 0)
+                )
+                """
+            )
+            con.execute(
+                """
+                CREATE INDEX unrelated_facts_value_idx
+                ON unrelated_facts (value)
+                """
+            )
+            con.execute(
+                f"""
+                CREATE FUNCTION {function_name}()
+                RETURNS trigger
+                LANGUAGE plpgsql
+                AS $$
+                BEGIN
+                    RETURN NEW;
+                END;
+                $$
+                """
+            )
+            con.execute(
+                f"""
+                CREATE TRIGGER ti11d_unrelated_trigger
+                BEFORE INSERT ON unrelated_facts
+                FOR EACH ROW
+                EXECUTE FUNCTION {function_name}()
+                """
+            )
+
+        assert manager.migrate() == CURRENT_SCHEMA_VERSION
+
+    finally:
+        with connect() as con:
+            con.execute(
+                "DROP TABLE IF EXISTS unrelated_facts CASCADE"
+            )
+            con.execute(
+                f"DROP FUNCTION IF EXISTS {function_name}()"
+            )
+        reset_database()
+
+    assert manager.migrate() == CURRENT_SCHEMA_VERSION

@@ -1,9 +1,12 @@
 import pytest
 
 from investment_domain.postgres_migrations import (
+    CURRENT_SCHEMA_VERSION,
+    MIGRATIONS,
     MIGRATION_HISTORY_TABLE,
     MIGRATION_LOCK_NAMESPACE,
     Migration,
+    PostgreSQLMigrationManager,
     validate_migrations,
 )
 
@@ -418,3 +421,47 @@ def test_edge_created_at_migration_checksum_is_content_bound():
     )
 
     assert changed.checksum != EDGE_CREATED_AT.checksum
+
+
+def test_physical_schema_validation_requires_canonical_migration_lineage():
+    manager = PostgreSQLMigrationManager(
+        "postgresql://unused",
+        migrations=(
+            Migration(1, "custom", ("SELECT 1",)),
+        ),
+    )
+
+    assert manager._uses_canonical_migration_lineage() is False
+
+    class UnexpectedConnection:
+        def execute(self, *args, **kwargs):
+            raise AssertionError(
+                "physical schema catalog must not be queried "
+                "for non-canonical migration lineage"
+            )
+
+    manager._validate_physical_schema(
+        UnexpectedConnection(),
+        manager.max_supported_version,
+    )
+
+
+def test_physical_schema_validation_requires_current_schema_target():
+    manager = PostgreSQLMigrationManager(
+        "postgresql://unused",
+        migrations=MIGRATIONS,
+    )
+
+    assert manager._uses_canonical_migration_lineage() is True
+
+    class UnexpectedConnection:
+        def execute(self, *args, **kwargs):
+            raise AssertionError(
+                "physical schema catalog must not be queried "
+                "for historical target"
+            )
+
+    manager._validate_physical_schema(
+        UnexpectedConnection(),
+        CURRENT_SCHEMA_VERSION - 1,
+    )

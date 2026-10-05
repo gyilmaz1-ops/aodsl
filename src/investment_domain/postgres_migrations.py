@@ -1312,6 +1312,376 @@ CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version
 validate_migrations(MIGRATIONS)
 
 
+
+# Canonical PostgreSQL 16 physical constraint surface for schema v22.
+# This is a final-state contract, not a union of historical migration DDL.
+EXPECTED_SCHEMA_V22_CONSTRAINTS = (('calculation_facts',
+  'calculation_domain_node_fk',
+  'f',
+  'FOREIGN KEY (node_id, node_type) REFERENCES domain_nodes(id, node_type) ON DELETE RESTRICT'),
+ ('calculation_facts', 'calculation_facts_pkey', 'p', 'PRIMARY KEY (node_id)'),
+ ('calculation_facts', 'calculation_node_type', 'c', "CHECK ((node_type = 'Calculation'::text))"),
+ ('catalyst_facts',
+  'catalyst_domain_node_fk',
+  'f',
+  'FOREIGN KEY (node_id, node_type) REFERENCES domain_nodes(id, node_type) ON DELETE RESTRICT'),
+ ('catalyst_facts', 'catalyst_facts_pkey', 'p', 'PRIMARY KEY (node_id)'),
+ ('catalyst_facts', 'catalyst_node_type', 'c', "CHECK ((node_type = 'Catalyst'::text))"),
+ ('catalyst_impact_facts',
+  'catalyst_impact_confidence_range',
+  'c',
+  'CHECK (((confidence >= (0)::numeric) AND (confidence <= (1)::numeric)))'),
+ ('catalyst_impact_facts',
+  'catalyst_impact_direction',
+  'c',
+  "CHECK ((direction = ANY (ARRAY['POSITIVE'::text, 'NEGATIVE'::text, 'NEUTRAL'::text])))"),
+ ('catalyst_impact_facts',
+  'catalyst_impact_domain_node_fk',
+  'f',
+  'FOREIGN KEY (node_id, node_type) REFERENCES domain_nodes(id, node_type) ON DELETE RESTRICT'),
+ ('catalyst_impact_facts', 'catalyst_impact_facts_pkey', 'p', 'PRIMARY KEY (node_id)'),
+ ('catalyst_impact_facts',
+  'catalyst_impact_horizon',
+  'c',
+  "CHECK ((horizon = ANY (ARRAY['NEAR_TERM'::text, 'MEDIUM_TERM'::text, 'LONG_TERM'::text])))"),
+ ('catalyst_impact_facts',
+  'catalyst_impact_magnitude',
+  'c',
+  "CHECK ((magnitude = ANY (ARRAY['LOW'::text, 'MEDIUM'::text, 'HIGH'::text])))"),
+ ('catalyst_impact_facts',
+  'catalyst_impact_node_type',
+  'c',
+  "CHECK ((node_type = 'CatalystImpact'::text))"),
+ ('catalyst_impact_facts',
+  'catalyst_impact_probability_range',
+  'c',
+  'CHECK (((probability >= (0)::numeric) AND (probability <= (1)::numeric)))'),
+ ('claim_facts',
+  'claim_domain_node_fk',
+  'f',
+  'FOREIGN KEY (node_id, node_type) REFERENCES domain_nodes(id, node_type) ON DELETE RESTRICT'),
+ ('claim_facts', 'claim_facts_pkey', 'p', 'PRIMARY KEY (node_id)'),
+ ('claim_facts', 'claim_node_type', 'c', "CHECK ((node_type = 'Claim'::text))"),
+ ('domain_edges', 'domain_edges_no_self_edge', 'c', 'CHECK ((source_id <> target_id))'),
+ ('domain_edges', 'domain_edges_pkey', 'p', 'PRIMARY KEY (source_id, edge_type, target_id)'),
+ ('domain_edges',
+  'domain_edges_source_id_fkey',
+  'f',
+  'FOREIGN KEY (source_id) REFERENCES domain_nodes(id) ON DELETE RESTRICT'),
+ ('domain_edges',
+  'domain_edges_source_relation_target_type',
+  'c',
+  "CHECK ((((source_type = 'Claim'::text) AND (edge_type = ANY (ARRAY['SUPPORTED_BY'::text, "
+  "'CONTRADICTED_BY'::text])) AND (target_type = 'Evidence'::text)) OR ((source_type = "
+  "'Metric'::text) AND (edge_type = 'SUPPORTED_BY'::text) AND (target_type = 'Evidence'::text)) OR "
+  "((source_type = 'Calculation'::text) AND (edge_type = 'DERIVED_FROM'::text) AND (target_type = "
+  "ANY (ARRAY['Metric'::text, 'Calculation'::text]))) OR ((source_type = 'Estimate'::text) AND "
+  "(edge_type = 'DERIVED_FROM'::text) AND (target_type = ANY (ARRAY['Metric'::text, "
+  "'Calculation'::text, 'Claim'::text]))) OR ((source_type = 'Valuation'::text) AND (edge_type = "
+  "'DEPENDS_ON'::text) AND (target_type = ANY (ARRAY['Forecast'::text, 'Estimate'::text, "
+  "'Metric'::text, 'Calculation'::text, 'CatalystImpact'::text]))) OR ((source_type = "
+  "'Forecast'::text) AND (edge_type = 'CONTAINS'::text) AND (target_type = 'Estimate'::text)) OR "
+  "((source_type = 'Catalyst'::text) AND (edge_type = 'AFFECTS'::text) AND (target_type = ANY "
+  "(ARRAY['Claim'::text, 'Forecast'::text]))) OR ((source_type = 'Recommendation'::text) AND "
+  "(edge_type = 'DEPENDS_ON'::text) AND (target_type = ANY (ARRAY['Valuation'::text, "
+  "'Claim'::text, 'Risk'::text, 'Catalyst'::text]))) OR ((source_type = 'Risk'::text) AND "
+  "(edge_type = 'AFFECTS'::text) AND (target_type = ANY (ARRAY['Claim'::text, 'Forecast'::text, "
+  "'Valuation'::text])))))"),
+ ('domain_edges',
+  'domain_edges_source_typed_fk',
+  'f',
+  'FOREIGN KEY (source_id, source_type) REFERENCES domain_nodes(id, node_type) ON DELETE RESTRICT'),
+ ('domain_edges',
+  'domain_edges_target_id_fkey',
+  'f',
+  'FOREIGN KEY (target_id) REFERENCES domain_nodes(id) ON DELETE RESTRICT'),
+ ('domain_edges',
+  'domain_edges_target_type',
+  'c',
+  "CHECK ((target_type = ANY (ARRAY['Evidence'::text, 'Metric'::text, 'Calculation'::text, "
+  "'Claim'::text, 'Forecast'::text, 'Estimate'::text, 'CatalystImpact'::text, 'Valuation'::text, "
+  "'Risk'::text, 'Catalyst'::text])))"),
+ ('domain_edges',
+  'domain_edges_target_typed_fk',
+  'f',
+  'FOREIGN KEY (target_id, target_type) REFERENCES domain_nodes(id, node_type) ON DELETE RESTRICT'),
+ ('domain_edges',
+  'domain_edges_type',
+  'c',
+  "CHECK ((edge_type = ANY (ARRAY['SUPPORTED_BY'::text, 'CONTRADICTED_BY'::text, "
+  "'DERIVED_FROM'::text, 'DEPENDS_ON'::text, 'CONTAINS'::text, 'AFFECTS'::text])))"),
+ ('domain_nodes', 'domain_nodes_id_node_type_unique', 'u', 'UNIQUE (id, node_type)'),
+ ('domain_nodes',
+  'domain_nodes_node_type',
+  'c',
+  "CHECK ((node_type = ANY (ARRAY['Company'::text, 'Security'::text, 'Metric'::text, "
+  "'Claim'::text, 'Evidence'::text, 'Calculation'::text, 'Estimate'::text, 'Forecast'::text, "
+  "'Catalyst'::text, 'CatalystImpact'::text, 'Risk'::text, 'Valuation'::text, "
+  "'Recommendation'::text])))"),
+ ('domain_nodes',
+  'domain_nodes_payload_hash_sha256',
+  'c',
+  "CHECK ((payload_hash ~ '^[0-9a-f]{64}$'::text))"),
+ ('domain_nodes', 'domain_nodes_pkey', 'p', 'PRIMARY KEY (id)'),
+ ('estimate_facts',
+  'estimate_domain_node_fk',
+  'f',
+  'FOREIGN KEY (node_id, node_type) REFERENCES domain_nodes(id, node_type) ON DELETE RESTRICT'),
+ ('estimate_facts', 'estimate_facts_pkey', 'p', 'PRIMARY KEY (node_id)'),
+ ('estimate_facts', 'estimate_node_type', 'c', "CHECK ((node_type = 'Estimate'::text))"),
+ ('evidence_facts',
+  'evidence_content_hash_sha256',
+  'c',
+  "CHECK ((content_hash ~ '^[0-9a-f]{64}$'::text))"),
+ ('evidence_facts',
+  'evidence_domain_node_fk',
+  'f',
+  'FOREIGN KEY (node_id, node_type) REFERENCES domain_nodes(id, node_type) ON DELETE RESTRICT'),
+ ('evidence_facts', 'evidence_facts_pkey', 'p', 'PRIMARY KEY (node_id)'),
+ ('evidence_facts',
+  'evidence_facts_supersedes_id_fkey',
+  'f',
+  'FOREIGN KEY (supersedes_id) REFERENCES evidence_facts(node_id) ON DELETE RESTRICT'),
+ ('evidence_facts', 'evidence_ingestion_order', 'c', 'CHECK ((published_at <= ingested_at))'),
+ ('evidence_facts',
+  'evidence_no_self_supersession',
+  'c',
+  'CHECK (((supersedes_id IS NULL) OR (supersedes_id <> node_id)))'),
+ ('evidence_facts', 'evidence_node_type', 'c', "CHECK ((node_type = 'Evidence'::text))"),
+ ('evidence_facts', 'evidence_publication_order', 'c', 'CHECK ((observed_at <= published_at))'),
+ ('forecast_facts',
+  'forecast_domain_node_fk',
+  'f',
+  'FOREIGN KEY (node_id, node_type) REFERENCES domain_nodes(id, node_type) ON DELETE RESTRICT'),
+ ('forecast_facts', 'forecast_facts_pkey', 'p', 'PRIMARY KEY (node_id)'),
+ ('forecast_facts', 'forecast_node_type', 'c', "CHECK ((node_type = 'Forecast'::text))"),
+ ('investment_domain_schema_migrations',
+  'investment_domain_schema_migrations_pkey',
+  'p',
+  'PRIMARY KEY (version)'),
+ ('metric_facts',
+  'metric_domain_node_fk',
+  'f',
+  'FOREIGN KEY (node_id, node_type) REFERENCES domain_nodes(id, node_type) ON DELETE RESTRICT'),
+ ('metric_facts', 'metric_facts_pkey', 'p', 'PRIMARY KEY (node_id)'),
+ ('metric_facts',
+  'metric_no_self_supersession',
+  'c',
+  'CHECK (((supersedes_id IS NULL) OR (supersedes_id <> node_id)))'),
+ ('metric_facts', 'metric_node_type', 'c', "CHECK ((node_type = 'Metric'::text))"),
+ ('metric_facts',
+  'metric_supersedes_fk',
+  'f',
+  'FOREIGN KEY (supersedes_id) REFERENCES metric_facts(node_id) ON DELETE RESTRICT'),
+ ('recommendation_facts',
+  'recommendation_domain_node_fk',
+  'f',
+  'FOREIGN KEY (node_id, node_type) REFERENCES domain_nodes(id, node_type) ON DELETE RESTRICT'),
+ ('recommendation_facts', 'recommendation_facts_pkey', 'p', 'PRIMARY KEY (node_id)'),
+ ('recommendation_facts',
+  'recommendation_node_type',
+  'c',
+  "CHECK ((node_type = 'Recommendation'::text))"),
+ ('risk_facts',
+  'risk_domain_node_fk',
+  'f',
+  'FOREIGN KEY (node_id, node_type) REFERENCES domain_nodes(id, node_type) ON DELETE RESTRICT'),
+ ('risk_facts', 'risk_facts_pkey', 'p', 'PRIMARY KEY (node_id)'),
+ ('risk_facts', 'risk_node_type', 'c', "CHECK ((node_type = 'Risk'::text))"),
+ ('valuation_facts',
+  'valuation_domain_node_fk',
+  'f',
+  'FOREIGN KEY (node_id, node_type) REFERENCES domain_nodes(id, node_type) ON DELETE RESTRICT'),
+ ('valuation_facts', 'valuation_facts_pkey', 'p', 'PRIMARY KEY (node_id)'),
+ ('valuation_facts', 'valuation_node_type', 'c', "CHECK ((node_type = 'Valuation'::text))"))
+
+
+
+EXPECTED_SCHEMA_V22_COLUMNS = (('calculation_facts', 'node_id', 1, 'text', 'text', 'NO', ''),
+ ('calculation_facts', 'node_type', 2, 'text', 'text', 'NO', "'Calculation'::text"),
+ ('calculation_facts', 'subject_id', 3, 'text', 'text', 'NO', ''),
+ ('calculation_facts', 'formula', 4, 'text', 'text', 'NO', ''),
+ ('calculation_facts', 'input_ids', 5, 'ARRAY', '_text', 'NO', ''),
+ ('calculation_facts', 'value', 6, 'numeric', 'numeric', 'NO', ''),
+ ('calculation_facts', 'unit', 7, 'text', 'text', 'NO', ''),
+ ('calculation_facts', 'currency', 8, 'text', 'text', 'YES', ''),
+ ('calculation_facts', 'model_version', 9, 'text', 'text', 'NO', ''),
+ ('catalyst_facts', 'node_id', 1, 'text', 'text', 'NO', ''),
+ ('catalyst_facts', 'node_type', 2, 'text', 'text', 'NO', "'Catalyst'::text"),
+ ('catalyst_facts', 'subject_id', 3, 'text', 'text', 'NO', ''),
+ ('catalyst_facts', 'description', 4, 'text', 'text', 'NO', ''),
+ ('catalyst_facts', 'as_of', 5, 'timestamp with time zone', 'timestamptz', 'NO', ''),
+ ('catalyst_facts', 'expected_at', 6, 'timestamp with time zone', 'timestamptz', 'YES', ''),
+ ('catalyst_impact_facts', 'node_id', 1, 'text', 'text', 'NO', ''),
+ ('catalyst_impact_facts', 'node_type', 2, 'text', 'text', 'NO', "'CatalystImpact'::text"),
+ ('catalyst_impact_facts', 'catalyst_id', 3, 'text', 'text', 'NO', ''),
+ ('catalyst_impact_facts', 'target_id', 4, 'text', 'text', 'NO', ''),
+ ('catalyst_impact_facts', 'direction', 5, 'text', 'text', 'NO', ''),
+ ('catalyst_impact_facts', 'magnitude', 6, 'text', 'text', 'NO', ''),
+ ('catalyst_impact_facts', 'probability', 7, 'numeric', 'numeric', 'NO', ''),
+ ('catalyst_impact_facts', 'confidence', 8, 'numeric', 'numeric', 'NO', ''),
+ ('catalyst_impact_facts', 'horizon', 9, 'text', 'text', 'NO', ''),
+ ('catalyst_impact_facts', 'rationale', 10, 'text', 'text', 'NO', ''),
+ ('catalyst_impact_facts', 'as_of', 11, 'timestamp with time zone', 'timestamptz', 'NO', ''),
+ ('catalyst_impact_facts', 'created_by', 12, 'text', 'text', 'NO', ''),
+ ('claim_facts', 'node_id', 1, 'text', 'text', 'NO', ''),
+ ('claim_facts', 'node_type', 2, 'text', 'text', 'NO', "'Claim'::text"),
+ ('claim_facts', 'subject_id', 3, 'text', 'text', 'NO', ''),
+ ('claim_facts', 'predicate', 4, 'text', 'text', 'NO', ''),
+ ('claim_facts', 'as_of', 5, 'timestamp with time zone', 'timestamptz', 'NO', ''),
+ ('claim_facts', 'polarity', 6, 'text', 'text', 'NO', ''),
+ ('claim_facts', 'scope', 7, 'text', 'text', 'NO', ''),
+ ('domain_edges', 'source_id', 1, 'text', 'text', 'NO', ''),
+ ('domain_edges', 'edge_type', 2, 'text', 'text', 'NO', ''),
+ ('domain_edges', 'target_id', 3, 'text', 'text', 'NO', ''),
+ ('domain_edges',
+  'stored_at',
+  4,
+  'timestamp with time zone',
+  'timestamptz',
+  'NO',
+  'CURRENT_TIMESTAMP'),
+ ('domain_edges', 'created_at', 5, 'timestamp with time zone', 'timestamptz', 'NO', ''),
+ ('domain_edges', 'source_type', 6, 'text', 'text', 'NO', ''),
+ ('domain_edges', 'target_type', 7, 'text', 'text', 'NO', ''),
+ ('domain_nodes', 'id', 1, 'text', 'text', 'NO', ''),
+ ('domain_nodes', 'node_type', 2, 'text', 'text', 'NO', ''),
+ ('domain_nodes', 'canonical_payload', 3, 'jsonb', 'jsonb', 'NO', ''),
+ ('domain_nodes', 'payload_hash', 4, 'text', 'text', 'NO', ''),
+ ('domain_nodes',
+  'stored_at',
+  5,
+  'timestamp with time zone',
+  'timestamptz',
+  'NO',
+  'CURRENT_TIMESTAMP'),
+ ('estimate_facts', 'node_id', 1, 'text', 'text', 'NO', ''),
+ ('estimate_facts', 'node_type', 2, 'text', 'text', 'NO', "'Estimate'::text"),
+ ('estimate_facts', 'subject_id', 3, 'text', 'text', 'NO', ''),
+ ('estimate_facts', 'metric_name', 4, 'text', 'text', 'NO', ''),
+ ('estimate_facts', 'period_end', 5, 'timestamp with time zone', 'timestamptz', 'NO', ''),
+ ('estimate_facts', 'value', 6, 'numeric', 'numeric', 'NO', ''),
+ ('estimate_facts', 'unit', 7, 'text', 'text', 'NO', ''),
+ ('estimate_facts', 'scenario', 8, 'text', 'text', 'NO', ''),
+ ('estimate_facts', 'model_version', 9, 'text', 'text', 'NO', ''),
+ ('estimate_facts', 'as_of', 10, 'timestamp with time zone', 'timestamptz', 'NO', ''),
+ ('estimate_facts', 'currency', 11, 'text', 'text', 'YES', ''),
+ ('evidence_facts', 'node_id', 1, 'text', 'text', 'NO', ''),
+ ('evidence_facts', 'node_type', 2, 'text', 'text', 'NO', "'Evidence'::text"),
+ ('evidence_facts', 'source_id', 3, 'text', 'text', 'NO', ''),
+ ('evidence_facts', 'source_version', 4, 'text', 'text', 'NO', ''),
+ ('evidence_facts', 'content_hash', 5, 'text', 'text', 'NO', ''),
+ ('evidence_facts', 'effective_at', 6, 'timestamp with time zone', 'timestamptz', 'NO', ''),
+ ('evidence_facts', 'observed_at', 7, 'timestamp with time zone', 'timestamptz', 'NO', ''),
+ ('evidence_facts', 'published_at', 8, 'timestamp with time zone', 'timestamptz', 'NO', ''),
+ ('evidence_facts', 'ingested_at', 9, 'timestamp with time zone', 'timestamptz', 'NO', ''),
+ ('evidence_facts', 'supersedes_id', 10, 'text', 'text', 'YES', ''),
+ ('evidence_facts', 'source_uri', 11, 'text', 'text', 'YES', ''),
+ ('forecast_facts', 'node_id', 1, 'text', 'text', 'NO', ''),
+ ('forecast_facts', 'node_type', 2, 'text', 'text', 'NO', "'Forecast'::text"),
+ ('forecast_facts', 'subject_id', 3, 'text', 'text', 'NO', ''),
+ ('forecast_facts', 'scenario', 4, 'text', 'text', 'NO', ''),
+ ('forecast_facts', 'as_of', 5, 'timestamp with time zone', 'timestamptz', 'NO', ''),
+ ('forecast_facts', 'model_version', 6, 'text', 'text', 'NO', ''),
+ ('investment_domain_schema_migrations', 'version', 1, 'integer', 'int4', 'NO', ''),
+ ('investment_domain_schema_migrations', 'name', 2, 'text', 'text', 'NO', ''),
+ ('investment_domain_schema_migrations', 'checksum', 3, 'text', 'text', 'NO', ''),
+ ('investment_domain_schema_migrations',
+  'applied_at',
+  4,
+  'timestamp with time zone',
+  'timestamptz',
+  'NO',
+  'CURRENT_TIMESTAMP'),
+ ('metric_facts', 'node_id', 1, 'text', 'text', 'NO', ''),
+ ('metric_facts', 'node_type', 2, 'text', 'text', 'NO', "'Metric'::text"),
+ ('metric_facts', 'subject_id', 3, 'text', 'text', 'NO', ''),
+ ('metric_facts', 'name', 4, 'text', 'text', 'NO', ''),
+ ('metric_facts', 'value', 5, 'numeric', 'numeric', 'NO', ''),
+ ('metric_facts', 'unit', 6, 'text', 'text', 'NO', ''),
+ ('metric_facts', 'currency', 7, 'text', 'text', 'YES', ''),
+ ('metric_facts', 'period_start', 8, 'timestamp with time zone', 'timestamptz', 'YES', ''),
+ ('metric_facts', 'period_end', 9, 'timestamp with time zone', 'timestamptz', 'NO', ''),
+ ('metric_facts', 'effective_at', 10, 'timestamp with time zone', 'timestamptz', 'NO', ''),
+ ('metric_facts', 'observed_at', 11, 'timestamp with time zone', 'timestamptz', 'NO', ''),
+ ('metric_facts', 'published_at', 12, 'timestamp with time zone', 'timestamptz', 'NO', ''),
+ ('metric_facts', 'ingested_at', 13, 'timestamp with time zone', 'timestamptz', 'NO', ''),
+ ('metric_facts', 'source_id', 14, 'text', 'text', 'NO', ''),
+ ('metric_facts', 'source_version', 15, 'text', 'text', 'NO', ''),
+ ('metric_facts', 'supersedes_id', 16, 'text', 'text', 'YES', ''),
+ ('recommendation_facts', 'node_id', 1, 'text', 'text', 'NO', ''),
+ ('recommendation_facts', 'node_type', 2, 'text', 'text', 'NO', "'Recommendation'::text"),
+ ('recommendation_facts', 'security_id', 3, 'text', 'text', 'NO', ''),
+ ('recommendation_facts', 'action', 4, 'text', 'text', 'NO', ''),
+ ('recommendation_facts', 'as_of', 5, 'timestamp with time zone', 'timestamptz', 'NO', ''),
+ ('recommendation_facts', 'created_by', 6, 'text', 'text', 'NO', ''),
+ ('recommendation_facts', 'rationale_claim_ids', 7, 'ARRAY', '_text', 'NO', ''),
+ ('risk_facts', 'node_id', 1, 'text', 'text', 'NO', ''),
+ ('risk_facts', 'node_type', 2, 'text', 'text', 'NO', "'Risk'::text"),
+ ('risk_facts', 'subject_id', 3, 'text', 'text', 'NO', ''),
+ ('risk_facts', 'description', 4, 'text', 'text', 'NO', ''),
+ ('risk_facts', 'as_of', 5, 'timestamp with time zone', 'timestamptz', 'NO', ''),
+ ('valuation_facts', 'node_id', 1, 'text', 'text', 'NO', ''),
+ ('valuation_facts', 'node_type', 2, 'text', 'text', 'NO', "'Valuation'::text"),
+ ('valuation_facts', 'security_id', 3, 'text', 'text', 'NO', ''),
+ ('valuation_facts', 'method', 4, 'text', 'text', 'NO', ''),
+ ('valuation_facts', 'value', 5, 'numeric', 'numeric', 'NO', ''),
+ ('valuation_facts', 'currency', 6, 'text', 'text', 'NO', ''),
+ ('valuation_facts', 'as_of', 7, 'timestamp with time zone', 'timestamptz', 'NO', ''),
+ ('valuation_facts', 'model_version', 8, 'text', 'text', 'NO', ''),
+ ('valuation_facts', 'scenario', 9, 'text', 'text', 'NO', ''))
+
+EXPECTED_SCHEMA_V22_EXPLICIT_INDEXES = (('domain_edges',
+  'idx_domain_edges_target',
+  False,
+  False,
+  'CREATE INDEX idx_domain_edges_target ON public.domain_edges USING btree (target_id, edge_type, '
+  'source_id)'),
+ ('evidence_facts',
+  'idx_evidence_supersedes',
+  True,
+  False,
+  'CREATE UNIQUE INDEX idx_evidence_supersedes ON public.evidence_facts USING btree '
+  '(supersedes_id) WHERE (supersedes_id IS NOT NULL)'),
+ ('evidence_facts',
+  'idx_evidence_visibility',
+  False,
+  False,
+  'CREATE INDEX idx_evidence_visibility ON public.evidence_facts USING btree (published_at, '
+  'ingested_at, node_id)'),
+ ('metric_facts',
+  'metric_one_successor_per_predecessor',
+  True,
+  False,
+  'CREATE UNIQUE INDEX metric_one_successor_per_predecessor ON public.metric_facts USING btree '
+  '(supersedes_id) WHERE (supersedes_id IS NOT NULL)'))
+
+EXPECTED_SCHEMA_V22_TRIGGERS: tuple[
+    tuple[str, str, str, str, str], ...
+] = ()
+
+
+# Exact Investment Domain table boundary owned by the canonical v22
+# physical-schema contract. Objects on unrelated tables in the same
+# PostgreSQL schema are intentionally outside this attestation surface.
+EXPECTED_SCHEMA_V22_TABLES = (
+    "calculation_facts",
+    "catalyst_facts",
+    "catalyst_impact_facts",
+    "claim_facts",
+    "domain_edges",
+    "domain_nodes",
+    "estimate_facts",
+    "evidence_facts",
+    "forecast_facts",
+    "investment_domain_schema_migrations",
+    "metric_facts",
+    "recommendation_facts",
+    "risk_facts",
+    "valuation_facts",
+)
+
+
 class MigrationError(RuntimeError):
     """Fail-closed Investment Domain schema migration error."""
 
@@ -1428,6 +1798,273 @@ class PostgreSQLMigrationManager:
 
         return max(rows) if rows else 0
 
+    @staticmethod
+    def _physical_column_surface(con) -> tuple[
+        tuple[str, str, int, str, str, str, str], ...
+    ]:
+        rows = con.execute(
+            """
+            SELECT
+                c.table_name,
+                c.column_name,
+                c.ordinal_position,
+                c.data_type,
+                c.udt_name,
+                c.is_nullable,
+                COALESCE(c.column_default, '')
+            FROM information_schema.columns AS c
+            WHERE c.table_schema = current_schema()
+              AND c.table_name = ANY(%s)
+            ORDER BY c.table_name, c.ordinal_position
+            """,
+            (list(EXPECTED_SCHEMA_V22_TABLES),),
+        ).fetchall()
+
+        return tuple(
+            (
+                str(table_name),
+                str(column_name),
+                int(position),
+                str(data_type),
+                str(udt_name),
+                str(nullable),
+                str(default),
+            )
+            for (
+                table_name,
+                column_name,
+                position,
+                data_type,
+                udt_name,
+                nullable,
+                default,
+            ) in rows
+        )
+
+    @staticmethod
+    def _physical_explicit_index_surface(con) -> tuple[
+        tuple[str, str, bool, bool, str], ...
+    ]:
+        rows = con.execute(
+            """
+            SELECT
+                t.relname,
+                i.relname,
+                ix.indisunique,
+                ix.indisprimary,
+                pg_get_indexdef(i.oid)
+            FROM pg_index AS ix
+            JOIN pg_class AS i
+              ON i.oid = ix.indexrelid
+            JOIN pg_class AS t
+              ON t.oid = ix.indrelid
+            JOIN pg_namespace AS n
+              ON n.oid = t.relnamespace
+            WHERE n.nspname = current_schema()
+              AND t.relname = ANY(%s)
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM pg_constraint AS c
+                  WHERE c.conindid = i.oid
+              )
+            ORDER BY t.relname, i.relname
+            """,
+            (list(EXPECTED_SCHEMA_V22_TABLES),),
+        ).fetchall()
+
+        return tuple(
+            (
+                str(table_name),
+                str(index_name),
+                bool(unique),
+                bool(primary),
+                str(definition),
+            )
+            for (
+                table_name,
+                index_name,
+                unique,
+                primary,
+                definition,
+            ) in rows
+        )
+
+    @staticmethod
+    def _physical_trigger_surface(con) -> tuple[
+        tuple[str, str, str, str, str], ...
+    ]:
+        rows = con.execute(
+            """
+            SELECT
+                event_object_table,
+                trigger_name,
+                event_manipulation,
+                action_timing,
+                action_statement
+            FROM information_schema.triggers
+            WHERE trigger_schema = current_schema()
+              AND event_object_table = ANY(%s)
+            ORDER BY
+                event_object_table,
+                trigger_name,
+                event_manipulation
+            """,
+            (list(EXPECTED_SCHEMA_V22_TABLES),),
+        ).fetchall()
+
+        return tuple(
+            tuple(str(value) for value in row)
+            for row in rows
+        )
+
+    @staticmethod
+    def _physical_constraint_surface(con) -> tuple[
+        tuple[str, str, str, str], ...
+    ]:
+        rows = con.execute(
+            """
+            SELECT
+                t.relname,
+                c.conname,
+                c.contype,
+                pg_get_constraintdef(c.oid, false)
+            FROM pg_constraint AS c
+            JOIN pg_class AS t
+              ON t.oid = c.conrelid
+            JOIN pg_namespace AS n
+              ON n.oid = t.relnamespace
+            WHERE n.nspname = current_schema()
+              AND t.relname = ANY(%s)
+            ORDER BY t.relname, c.conname
+            """,
+            (list(EXPECTED_SCHEMA_V22_TABLES),),
+        ).fetchall()
+
+        return tuple(
+            (
+                str(table_name),
+                str(constraint_name),
+                str(constraint_type),
+                str(definition),
+            )
+            for (
+                table_name,
+                constraint_name,
+                constraint_type,
+                definition,
+            ) in rows
+        )
+
+    def _uses_canonical_migration_lineage(self) -> bool:
+        return self.migrations == MIGRATIONS
+
+    @staticmethod
+    def _surface_diff(expected, actual):
+        expected_set = set(expected)
+        actual_set = set(actual)
+        return (
+            sorted(expected_set - actual_set),
+            sorted(actual_set - expected_set),
+        )
+
+    def _validate_physical_schema(self, con, target: int) -> None:
+        if not self._uses_canonical_migration_lineage():
+            return
+
+        if target != CURRENT_SCHEMA_VERSION:
+            return
+
+        expected_constraints = EXPECTED_SCHEMA_V22_CONSTRAINTS
+        actual_constraints = self._physical_constraint_surface(con)
+
+        expected_constraint_map = {
+            (table_name, constraint_name): (
+                constraint_type,
+                definition,
+            )
+            for (
+                table_name,
+                constraint_name,
+                constraint_type,
+                definition,
+            ) in expected_constraints
+        }
+        actual_constraint_map = {
+            (table_name, constraint_name): (
+                constraint_type,
+                definition,
+            )
+            for (
+                table_name,
+                constraint_name,
+                constraint_type,
+                definition,
+            ) in actual_constraints
+        }
+
+        constraint_missing = sorted(
+            set(expected_constraint_map)
+            - set(actual_constraint_map)
+        )
+        constraint_unexpected = sorted(
+            set(actual_constraint_map)
+            - set(expected_constraint_map)
+        )
+        constraint_mismatched = sorted(
+            key
+            for key in (
+                set(expected_constraint_map)
+                & set(actual_constraint_map)
+            )
+            if (
+                expected_constraint_map[key]
+                != actual_constraint_map[key]
+            )
+        )
+
+        column_missing, column_unexpected = self._surface_diff(
+            EXPECTED_SCHEMA_V22_COLUMNS,
+            self._physical_column_surface(con),
+        )
+        index_missing, index_unexpected = self._surface_diff(
+            EXPECTED_SCHEMA_V22_EXPLICIT_INDEXES,
+            self._physical_explicit_index_surface(con),
+        )
+        trigger_missing, trigger_unexpected = self._surface_diff(
+            EXPECTED_SCHEMA_V22_TRIGGERS,
+            self._physical_trigger_surface(con),
+        )
+
+        if not any((
+            constraint_missing,
+            constraint_unexpected,
+            constraint_mismatched,
+            column_missing,
+            column_unexpected,
+            index_missing,
+            index_unexpected,
+            trigger_missing,
+            trigger_unexpected,
+        )):
+            return
+
+        raise MigrationError(
+            "IDM-M411: PHYSICAL_SCHEMA_MISMATCH: "
+            "constraints: "
+            f"missing={constraint_missing!r}; "
+            f"unexpected={constraint_unexpected!r}; "
+            f"mismatched={constraint_mismatched!r}; "
+            "columns: "
+            f"missing={column_missing!r}; "
+            f"unexpected={column_unexpected!r}; "
+            "indexes: "
+            f"missing={index_missing!r}; "
+            f"unexpected={index_unexpected!r}; "
+            "triggers: "
+            f"missing={trigger_missing!r}; "
+            f"unexpected={trigger_unexpected!r}"
+        )
+
     def migrate(self, target_version: int | None = None) -> int:
         target = (
             self.max_supported_version
@@ -1483,4 +2120,5 @@ class PostgreSQLMigrationManager:
                         ),
                     )
 
+                self._validate_physical_schema(con, target)
                 return target
