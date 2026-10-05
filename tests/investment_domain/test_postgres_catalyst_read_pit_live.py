@@ -156,6 +156,52 @@ def test_catalyst_at_rejects_naive_cutoff_before_db(repo):
         )
 
 
+def test_catalyst_at_fails_closed_on_wrong_anchor_type(repo):
+    item = catalyst(
+        description="Wrong anchor type catalyst",
+    )
+
+    with repo.connect() as con:
+        with con.transaction():
+            con.execute(
+                """
+                INSERT INTO domain_nodes (
+                    id,
+                    node_type,
+                    canonical_payload,
+                    payload_hash
+                )
+                VALUES (
+                    %s,
+                    'Claim',
+                    '{}'::jsonb,
+                    %s
+                )
+                """,
+                (
+                    item.id,
+                    "0" * 64,
+                ),
+            )
+
+    try:
+        with pytest.raises(
+            RepositoryReadError,
+            match="IDM-R578: CATALYST_TYPE_MISMATCH",
+        ):
+            repo.catalyst_at(
+                item.id,
+                utc(2026, 9, 27, 8),
+            )
+    finally:
+        with repo.connect() as con:
+            with con.transaction():
+                con.execute(
+                    "DELETE FROM domain_nodes WHERE id = %s",
+                    (item.id,),
+                )
+
+
 def test_catalyst_at_fails_when_projection_missing(repo):
     item = catalyst()
     repo.add_catalyst(item)
