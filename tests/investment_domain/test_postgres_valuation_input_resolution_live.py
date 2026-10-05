@@ -713,6 +713,33 @@ def test_valuation_inputs_at_rejects_missing_valuation_projection(
         )
 
 
+def test_valuation_inputs_at_rejects_invalid_stored_valuation(
+    repo,
+):
+    node = valuation("r548-public-regression")
+    repo.add_valuation(node)
+
+    with repo.connect() as con:
+        with con.transaction():
+            con.execute(
+                """
+                UPDATE valuation_facts
+                SET method = ''
+                WHERE node_id = %s
+                """,
+                (node.id,),
+            )
+
+    with pytest.raises(
+        RepositoryReadError,
+        match="IDM-R548: INVALID_STORED_VALUATION",
+    ):
+        repo.valuation_inputs_at(
+            node.id,
+            utc(2026, 9, 30, 12),
+        )
+
+
 def test_valuation_inputs_at_rejects_valuation_canonical_anchor_tampering(
     repo,
 ):
