@@ -258,6 +258,50 @@ def test_multiple_assessments_for_same_pair_remain_distinct(repo):
     assert rows == [(first.id,), (second.id,)]
 
 
+def test_catalyst_impact_at_fails_closed_on_wrong_anchor_type(repo):
+    node = impact("wrong-anchor-type")
+
+    with repo.connect() as con:
+        with con.transaction():
+            con.execute(
+                """
+                INSERT INTO domain_nodes (
+                    id,
+                    node_type,
+                    canonical_payload,
+                    payload_hash
+                )
+                VALUES (
+                    %s,
+                    'Claim',
+                    '{}'::jsonb,
+                    %s
+                )
+                """,
+                (
+                    node.id,
+                    "0" * 64,
+                ),
+            )
+
+    try:
+        with pytest.raises(
+            RepositoryReadError,
+            match="IDM-R540: CATALYST_IMPACT_TYPE_MISMATCH",
+        ):
+            repo.catalyst_impact_at(
+                node.id,
+                utc(2026, 9, 27, 12),
+            )
+    finally:
+        with repo.connect() as con:
+            with con.transaction():
+                con.execute(
+                    "DELETE FROM domain_nodes WHERE id = %s",
+                    (node.id,),
+                )
+
+
 def test_catalyst_impact_at_rejects_noncanonical_id_before_database(repo):
     with pytest.raises(ValueError):
         repo.catalyst_impact_at(
