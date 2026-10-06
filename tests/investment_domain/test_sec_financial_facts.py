@@ -293,3 +293,59 @@ def test_malformed_numeric_value_fails_closed():
 
     with pytest.raises(FinancialFactValidationError):
         extract_financial_facts_from_ixbrl(broken)
+
+
+def test_unknown_unit_reference_fails_closed():
+    broken = MINIMAL_IXBRL.replace(
+        'unitRef="USD"',
+        'unitRef="MISSING"',
+    )
+
+    with pytest.raises(FinancialFactValidationError):
+        extract_financial_facts_from_ixbrl(broken)
+
+
+def test_missing_unit_definition_fails_closed():
+    broken = MINIMAL_IXBRL.replace(
+        """    <xbrli:unit id="USD">
+      <xbrli:measure>iso4217:USD</xbrli:measure>
+    </xbrli:unit>
+
+""",
+        "",
+    )
+
+    with pytest.raises(FinancialFactValidationError):
+        extract_financial_facts_from_ixbrl(broken)
+
+
+def test_blank_unit_id_cannot_satisfy_unit_reference():
+    broken = MINIMAL_IXBRL.replace(
+        '<xbrli:unit id="USD">',
+        '<xbrli:unit id="">',
+    )
+
+    with pytest.raises(FinancialFactValidationError):
+        extract_financial_facts_from_ixbrl(broken)
+
+
+def test_unit_reference_resolves_among_multiple_units():
+    expanded = MINIMAL_IXBRL.replace(
+        """    <xbrli:unit id="USD">
+      <xbrli:measure>iso4217:USD</xbrli:measure>
+    </xbrli:unit>
+""",
+        """    <xbrli:unit id="EUR">
+      <xbrli:measure>iso4217:EUR</xbrli:measure>
+    </xbrli:unit>
+
+    <xbrli:unit id="USD">
+      <xbrli:measure>iso4217:USD</xbrli:measure>
+    </xbrli:unit>
+""",
+    )
+
+    facts = extract_financial_facts_from_ixbrl(expanded)
+
+    assert len(facts) == 1
+    assert facts[0].unit_ref == "USD"

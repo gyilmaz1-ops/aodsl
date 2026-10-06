@@ -120,6 +120,14 @@ def extract_financial_facts_from_ixbrl(
 ) -> tuple[ExtractedFinancialFact, ...]:
     root = ET.fromstring(raw_content)
 
+    units = {
+        unit_id
+        for unit in root.iter(
+            f"{{{_XBRLI_NS}}}unit"
+        )
+        if (unit_id := unit.get("id"))
+    }
+
     contexts = {}
 
     for context in root.iter(
@@ -175,6 +183,11 @@ def extract_financial_facts_from_ixbrl(
         if not unit_ref:
             raise FinancialFactValidationError(
                 "financial fact requires unitRef"
+            )
+
+        if unit_ref not in units:
+            raise FinancialFactValidationError(
+                "financial fact references unknown unit"
             )
 
         if element.text is None:
