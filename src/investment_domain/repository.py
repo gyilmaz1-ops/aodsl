@@ -77,6 +77,13 @@ class EvidenceRepository(Protocol):
     ) -> None:
         ...
 
+    def add_metric_with_evidence_link(
+        self,
+        metric: Metric,
+        link: MetricEvidenceLink,
+    ) -> None:
+        ...
+
     def add_estimate(
         self,
         estimate: Estimate,

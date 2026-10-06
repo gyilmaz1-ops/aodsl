@@ -5227,6 +5227,149 @@ class PostgreSQLEvidenceRepository:
                         metric,
                     )
 
+    def add_metric_with_evidence_link(
+        self,
+        metric: Metric,
+        link: MetricEvidenceLink,
+    ) -> None:
+        validate_node(metric)
+        validate_metric_evidence_link(link)
+
+        if link.metric_id != metric.id:
+            raise ValueError(
+                "MetricEvidenceLink.metric_id must match Metric.id"
+            )
+
+        edge = Edge(
+            source_id=link.metric_id,
+            source_type=NodeType.METRIC,
+            edge_type=link.relation,
+            target_id=link.evidence_id,
+            target_type=NodeType.EVIDENCE,
+        )
+        validate_edge(edge)
+
+        payload, payload_hash = self._payload(metric)
+
+        with self.connect() as con:
+            with con.transaction():
+                if metric.supersedes_id is not None:
+                    self._validate_metric_revision_append(
+                        con,
+                        metric,
+                    )
+
+                self._insert_domain_node(
+                    con,
+                    node_id=metric.id,
+                    node_type=metric.node_type.value,
+                    payload=payload,
+                    payload_hash=payload_hash,
+                )
+
+                result = con.execute(
+                    """
+                    INSERT INTO metric_facts (
+                        node_id,
+                        node_type,
+                        subject_id,
+                        name,
+                        value,
+                        unit,
+                        currency,
+                        period_start,
+                        period_end,
+                        effective_at,
+                        observed_at,
+                        published_at,
+                        ingested_at,
+                        source_id,
+                        source_version,
+                        supersedes_id
+                    )
+                    VALUES (
+                        %s, %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s, %s, %s, %s
+                    )
+                    ON CONFLICT (node_id) DO NOTHING
+                    """,
+                    (
+                        metric.id,
+                        metric.node_type.value,
+                        metric.subject_id,
+                        metric.name,
+                        metric.value,
+                        metric.unit,
+                        metric.currency,
+                        metric.period_start,
+                        metric.period_end,
+                        metric.effective_at,
+                        metric.observed_at,
+                        metric.published_at,
+                        metric.ingested_at,
+                        metric.source_id,
+                        metric.source_version,
+                        metric.supersedes_id,
+                    ),
+                )
+
+                if result.rowcount == 0:
+                    self._assert_metric_projection_matches(
+                        con,
+                        metric,
+                    )
+
+                self._assert_edge_endpoint(
+                    con,
+                    node_id=link.metric_id,
+                    expected_type=NodeType.METRIC,
+                    missing_code="IDM-W507: EDGE_SOURCE_NOT_FOUND",
+                    mismatch_code="IDM-W509: EDGE_SOURCE_TYPE_MISMATCH",
+                )
+
+                self._assert_edge_endpoint(
+                    con,
+                    node_id=link.evidence_id,
+                    expected_type=NodeType.EVIDENCE,
+                    missing_code="IDM-W508: EDGE_TARGET_NOT_FOUND",
+                    mismatch_code="IDM-W510: EDGE_TARGET_TYPE_MISMATCH",
+                )
+
+                result = con.execute(
+                    """
+                    INSERT INTO domain_edges (
+                        source_id,
+                        source_type,
+                        edge_type,
+                        target_id,
+                        target_type,
+                        created_at
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    ON CONFLICT DO NOTHING
+                    """,
+                    (
+                        link.metric_id,
+                        NodeType.METRIC.value,
+                        link.relation.value,
+                        link.evidence_id,
+                        NodeType.EVIDENCE.value,
+                        link.created_at,
+                    ),
+                )
+
+                if result.rowcount == 0:
+                    self._assert_existing_edge_matches(
+                        con,
+                        source_id=link.metric_id,
+                        relation=link.relation,
+                        target_id=link.evidence_id,
+                        created_at=link.created_at,
+                        write_lost_code=(
+                            "IDM-W518: METRIC_EVIDENCE_EDGE_WRITE_LOST"
+                        ),
+                    )
+
     def add_security(
         self,
         security: Security,
