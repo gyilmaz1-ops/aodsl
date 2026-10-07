@@ -349,3 +349,160 @@ def test_unit_reference_resolves_among_multiple_units():
 
     assert len(facts) == 1
     assert facts[0].unit_ref == "USD"
+
+
+def test_conflicting_duplicate_financial_fact_fails_closed():
+    conflicting = MINIMAL_IXBRL.replace(
+        """    <ix:nonFraction
+      name="us-gaap:Revenues"
+      contextRef="FY2026"
+      unitRef="USD"
+      decimals="-3">1000000</ix:nonFraction>""",
+        """    <ix:nonFraction
+      name="us-gaap:Revenues"
+      contextRef="FY2026"
+      unitRef="USD"
+      decimals="-3">1000000</ix:nonFraction>
+
+    <ix:nonFraction
+      name="us-gaap:Revenues"
+      contextRef="FY2026"
+      unitRef="USD"
+      decimals="-3">2000000</ix:nonFraction>""",
+    )
+
+    with pytest.raises(
+        FinancialFactValidationError,
+        match="conflicting duplicate financial fact",
+    ):
+        extract_financial_facts_from_ixbrl(conflicting)
+
+
+def test_identical_duplicate_financial_fact_is_allowed():
+    duplicate = MINIMAL_IXBRL.replace(
+        """    <ix:nonFraction
+      name="us-gaap:Revenues"
+      contextRef="FY2026"
+      unitRef="USD"
+      decimals="-3">1000000</ix:nonFraction>""",
+        """    <ix:nonFraction
+      name="us-gaap:Revenues"
+      contextRef="FY2026"
+      unitRef="USD"
+      decimals="-3">1000000</ix:nonFraction>
+
+    <ix:nonFraction
+      name="us-gaap:Revenues"
+      contextRef="FY2026"
+      unitRef="USD"
+      decimals="-3">1000000</ix:nonFraction>""",
+    )
+
+    facts = extract_financial_facts_from_ixbrl(duplicate)
+
+    assert len(facts) == 2
+    assert facts[0].value == facts[1].value
+
+
+def test_numerically_equal_duplicate_financial_fact_is_allowed():
+    duplicate = MINIMAL_IXBRL.replace(
+        """    <ix:nonFraction
+      name="us-gaap:Revenues"
+      contextRef="FY2026"
+      unitRef="USD"
+      decimals="-3">1000000</ix:nonFraction>""",
+        """    <ix:nonFraction
+      name="us-gaap:Revenues"
+      contextRef="FY2026"
+      unitRef="USD"
+      decimals="-3">1000000</ix:nonFraction>
+
+    <ix:nonFraction
+      name="us-gaap:Revenues"
+      contextRef="FY2026"
+      unitRef="USD"
+      decimals="-3">1000000.00</ix:nonFraction>""",
+    )
+
+    facts = extract_financial_facts_from_ixbrl(duplicate)
+
+    assert len(facts) == 2
+    assert facts[0].value == facts[1].value
+
+
+def test_same_concept_with_different_context_is_not_duplicate():
+    different_context = MINIMAL_IXBRL.replace(
+        """  <xbrli:unit id="USD">""",
+        """  <xbrli:context id="FY2025">
+    <xbrli:entity>
+      <xbrli:identifier scheme="example">
+        EXAMPLE
+      </xbrli:identifier>
+    </xbrli:entity>
+    <xbrli:period>
+      <xbrli:startDate>2025-01-01</xbrli:startDate>
+      <xbrli:endDate>2025-12-31</xbrli:endDate>
+    </xbrli:period>
+  </xbrli:context>
+
+  <xbrli:unit id="USD">""",
+    ).replace(
+        """    <ix:nonFraction
+      name="us-gaap:Revenues"
+      contextRef="FY2026"
+      unitRef="USD"
+      decimals="-3">1000000</ix:nonFraction>""",
+        """    <ix:nonFraction
+      name="us-gaap:Revenues"
+      contextRef="FY2026"
+      unitRef="USD"
+      decimals="-3">1000000</ix:nonFraction>
+
+    <ix:nonFraction
+      name="us-gaap:Revenues"
+      contextRef="FY2025"
+      unitRef="USD"
+      decimals="-3">2000000</ix:nonFraction>""",
+    )
+
+    facts = extract_financial_facts_from_ixbrl(
+        different_context
+    )
+
+    assert len(facts) == 2
+    assert facts[0].context_id != facts[1].context_id
+
+
+def test_same_concept_and_context_with_different_unit_is_not_duplicate():
+    different_unit = MINIMAL_IXBRL.replace(
+        """  <xbrli:unit id="USD">""",
+        """  <xbrli:unit id="shares">
+    <xbrli:measure>xbrli:shares</xbrli:measure>
+  </xbrli:unit>
+
+  <xbrli:unit id="USD">""",
+    ).replace(
+        """    <ix:nonFraction
+      name="us-gaap:Revenues"
+      contextRef="FY2026"
+      unitRef="USD"
+      decimals="-3">1000000</ix:nonFraction>""",
+        """    <ix:nonFraction
+      name="us-gaap:Revenues"
+      contextRef="FY2026"
+      unitRef="USD"
+      decimals="-3">1000000</ix:nonFraction>
+
+    <ix:nonFraction
+      name="us-gaap:Revenues"
+      contextRef="FY2026"
+      unitRef="shares"
+      decimals="-3">2000000</ix:nonFraction>""",
+    )
+
+    facts = extract_financial_facts_from_ixbrl(
+        different_unit
+    )
+
+    assert len(facts) == 2
+    assert facts[0].unit_ref != facts[1].unit_ref

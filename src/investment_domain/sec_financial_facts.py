@@ -162,6 +162,10 @@ def extract_financial_facts_from_ixbrl(
         )
 
     facts = []
+    seen_fact_values: dict[
+        tuple[str, str, str],
+        Decimal,
+    ] = {}
 
     for element in root.iter(
         f"{{{_IX_NS}}}nonFraction"
@@ -221,6 +225,25 @@ def extract_financial_facts_from_ixbrl(
         )
 
         validate_extracted_financial_fact(fact)
+
+        fact_identity = (
+            fact.concept,
+            fact.context_id,
+            fact.unit_ref,
+        )
+        previous_value = seen_fact_values.get(
+            fact_identity
+        )
+
+        if (
+            previous_value is not None
+            and previous_value != fact.value
+        ):
+            raise FinancialFactValidationError(
+                "conflicting duplicate financial fact"
+            )
+
+        seen_fact_values[fact_identity] = fact.value
         facts.append(fact)
 
     return tuple(facts)
