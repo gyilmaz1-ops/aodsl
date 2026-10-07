@@ -25,7 +25,7 @@ def test_oidc_and_attestation_permissions():
 def test_attestation_subject_is_production_artifact():
     final = production_gate(text())
 
-    assert "uses: actions/attest@v4" in final
+    assert "uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6" in final
     assert (
         "subject-path: 'dist/aodsl-*-production-source.zip'"
         in final
@@ -41,7 +41,7 @@ def test_final_gate_orders_identity_attestation_and_certified_upload():
     identity_verify = (
         "python tools/verify_release_identity.py"
     )
-    attest = "uses: actions/attest@v4"
+    attest = "uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6"
     certified_upload = "name: aodsl-certified-production"
 
     for required in (
@@ -65,7 +65,7 @@ def test_final_gate_attests_only_after_reproducibility_comparison():
 
     compare = "python tools/verify_reproducible_artifacts.py"
     identity = "python tools/create_release_identity.py"
-    attest = "uses: actions/attest@v4"
+    attest = "uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6"
 
     assert compare in final
 

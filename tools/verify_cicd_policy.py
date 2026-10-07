@@ -453,17 +453,17 @@ final = parse_steps(final_job)
 
 require_action(
     build,
-    "actions/checkout@v4",
+    "actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
     "reproducible-build",
 )
 require_action(
     build,
-    "actions/upload-artifact@v4",
+    "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
     "reproducible-build",
 )
 require_action(
     final,
-    "actions/checkout@v4",
+    "actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
     "production-gate",
 )
 
@@ -530,7 +530,7 @@ if build_order != sorted(build_order):
 
 downloads = find_uses_steps(
     final,
-    "actions/download-artifact@v4",
+    "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093",
 )
 
 if len(downloads) != 2:
@@ -646,7 +646,7 @@ certified = final[
     find_named_step(final, "Upload certified artifact")
 ]
 
-if certified["uses"] != "actions/upload-artifact@v4":
+if certified["uses"] != "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02":
     fail("certified upload action invalid")
 
 certified_with = certified["with"]

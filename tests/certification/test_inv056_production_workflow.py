@@ -59,7 +59,7 @@ def test_inv056_final_gate_orders_closure_before_identity():
     identity_verify = final.index(
         "python tools/verify_release_identity.py"
     )
-    attest = final.index("uses: actions/attest@v4")
+    attest = final.index("uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6")
     upload = final.index("name: aodsl-certified-production")
 
     assert (

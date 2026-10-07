@@ -73,7 +73,7 @@ def test_inv055_uses_two_independent_matrix_build_executions():
     assert "python tools/verify_sbom.py" in build
 
     assert "name: aodsl-repro-${{ matrix.build }}" in build
-    assert "uses: actions/upload-artifact@v4" in build
+    assert "uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02" in build
 
     assert_order(
         build,
@@ -85,7 +85,7 @@ def test_inv055_uses_two_independent_matrix_build_executions():
         "python tools/release_gate.py --production",
         "python tools/create_sbom.py",
         "python tools/verify_sbom.py",
-        "uses: actions/upload-artifact@v4",
+        "uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
     )
 
 
@@ -98,7 +98,7 @@ def test_inv055_final_gate_compares_then_promotes_without_rebuild():
 
     assert "name: aodsl-repro-a" in final
     assert "name: aodsl-repro-b" in final
-    assert "uses: actions/download-artifact@v4" in final
+    assert "uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093" in final
 
     compare_parts = (
         "python tools/verify_reproducible_artifacts.py",
@@ -146,7 +146,7 @@ def test_inv055_final_gate_downloads_distinct_candidate_artifacts():
     workflow = workflow_text()
     final = job_block(workflow, "production-gate")
 
-    assert final.count("uses: actions/download-artifact@v4") == 2
+    assert final.count("uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093") == 2
 
     assert "name: aodsl-repro-a" in final
     assert "path: repro/a" in final
@@ -165,7 +165,7 @@ def test_inv055_reproducibility_evidence_is_in_certified_bundle():
     identity_verify = final.index(
         "python tools/verify_release_identity.py"
     )
-    attest = final.index("uses: actions/attest@v4")
+    attest = final.index("uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6")
     certified_upload = final.index(
         "name: aodsl-certified-production"
     )

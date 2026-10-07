@@ -135,7 +135,7 @@ def test_commented_attestations_are_rejected(
 ) -> None:
     workflow = mutant_workflow(
         tmp_path,
-        "uses: actions/attest@v4",
+        "uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6",
         expected_count=2,
     )
 

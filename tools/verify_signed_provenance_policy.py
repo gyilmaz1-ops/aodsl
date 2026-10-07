@@ -405,7 +405,7 @@ identity_verify = find_exec_step(
 attestations = [
     (index, step)
     for index, step in enumerate(final)
-    if step["uses"] == "actions/attest@v4"
+    if step["uses"] == "actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6"
 ]
 
 if len(attestations) != 2:
@@ -429,7 +429,7 @@ certified_upload = find_named_step(
 
 upload = final[certified_upload]
 
-if upload["uses"] != "actions/upload-artifact@v4":
+if upload["uses"] != "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02":
     fail("certified upload action invalid")
 
 if (

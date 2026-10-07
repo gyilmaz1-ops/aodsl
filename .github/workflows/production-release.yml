@@ -25,7 +25,7 @@ jobs:
 
     steps:
       - name: Checkout exact release source
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
       - name: Verify certified build environment
         env:
@@ -72,7 +72,7 @@ jobs:
           cp dist/release-manifest.json repro-output/
 
       - name: Upload reproducibility candidate
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: aodsl-repro-${{ matrix.build }}
           path: repro-output/
@@ -89,7 +89,7 @@ jobs:
 
     steps:
       - name: Checkout exact release source
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
       - name: Verify certified build environment
         env:
@@ -117,13 +117,13 @@ jobs:
         run: python tools/verify_production_dependencies.py
 
       - name: Download reproducibility candidate A
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: aodsl-repro-a
           path: repro/a
 
       - name: Download reproducibility candidate B
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: aodsl-repro-b
           path: repro/b
@@ -178,17 +178,17 @@ jobs:
         run: python tools/verify_release_identity.py
 
       - name: Generate signed build provenance
-        uses: actions/attest@v4
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
         with:
           subject-path: 'dist/aodsl-*-production-source.zip'
 
       - name: Generate signed SBOM provenance
-        uses: actions/attest@v4
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
         with:
           subject-path: 'dist/aodsl-*.cdx.json'
 
       - name: Upload certified artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: aodsl-certified-production
           path: |
