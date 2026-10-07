@@ -16,6 +16,6 @@
   },
   "production_deployment": "CERTIFIED",
   "schema": "aodsl.live-certification.v1",
-  "tested_source_tree_sha256": "c0969673d21b82b3dcfdbd0ac16f9733fcd8476838f345bc06b43138dea7dfa5",
+  "tested_source_tree_sha256": "d371389ebf135f3cb9643e928f2eb332a47942bf068c5a0d61d22ba248474378",
   "version": "1.0.0"
 }
