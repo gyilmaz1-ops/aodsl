@@ -108,6 +108,7 @@ import xml.etree.ElementTree as ET
 _IX_NS = "http://www.xbrl.org/2013/inlineXBRL"
 _XBRLI_NS = "http://www.xbrl.org/2003/instance"
 _XBRLDI_NS = "http://xbrl.org/2006/xbrldi"
+_XSI_NS = "http://www.w3.org/2001/XMLSchema-instance"
 
 
 def _date_utc(value: str) -> datetime:
@@ -149,14 +150,9 @@ def extract_financial_facts_from_ixbrl(
         end = period.find(
             f"{{{_XBRLI_NS}}}endDate"
         )
-
-        if (
-            start is None
-            or end is None
-            or start.text is None
-            or end.text is None
-        ):
-            continue
+        instant = period.find(
+            f"{{{_XBRLI_NS}}}instant"
+        )
 
         dimensions = tuple(
             sorted(
@@ -170,11 +166,21 @@ def extract_financial_facts_from_ixbrl(
             )
         )
 
-        contexts[context_id] = (
-            _date_utc(start.text),
-            _date_utc(end.text),
-            dimensions,
-        )
+        if (
+            start is not None
+            and end is not None
+            and start.text is not None
+            and end.text is not None
+        ):
+            contexts[context_id] = (
+                _date_utc(start.text),
+                _date_utc(end.text),
+                dimensions,
+            )
+            continue
+
+        if instant is not None and instant.text is not None:
+            contexts[context_id] = None
 
     facts = []
     seen_fact_values: dict[
@@ -185,6 +191,9 @@ def extract_financial_facts_from_ixbrl(
     for element in root.iter(
         f"{{{_IX_NS}}}nonFraction"
     ):
+        if element.get(f"{{{_XSI_NS}}}nil") == "true":
+            continue
+
         concept = element.get("name")
         context_id = element.get("contextRef")
         unit_ref = element.get("unitRef")
@@ -209,24 +218,86 @@ def extract_financial_facts_from_ixbrl(
                 "financial fact references unknown unit"
             )
 
-        if element.text is None:
-            raise FinancialFactValidationError(
-                "financial fact requires numeric content"
+        numeric_content = element.text
+
+        if numeric_content is None:
+            nested_nonfractions = tuple(
+                element.iter(
+                    f"{{{_IX_NS}}}nonFraction"
+                )
             )
 
-        period = contexts.get(context_id)
+            leaf_texts = tuple(
+                nested.text.strip()
+                for nested in nested_nonfractions[1:]
+                if nested.text is not None
+                and nested.text.strip()
+                and not any(
+                    child.tag
+                    == f"{{{_IX_NS}}}nonFraction"
+                    for child in nested
+                )
+            )
 
-        if period is None:
+            if len(leaf_texts) != 1:
+                raise FinancialFactValidationError(
+                    "financial fact requires numeric content"
+                )
+
+            numeric_content = leaf_texts[0]
+
+        if context_id not in contexts:
             raise FinancialFactValidationError(
                 "financial fact references unknown context"
             )
 
-        try:
-            value = Decimal(element.text.strip())
-        except InvalidOperation as exc:
-            raise FinancialFactValidationError(
-                "financial fact has invalid numeric content"
-            ) from exc
+        period = contexts[context_id]
+
+        if period is None:
+            continue
+
+        numeric_format = element.get("format")
+
+        if numeric_format == "ixt:fixed-zero":
+            value = Decimal("0")
+        else:
+            numeric_text = numeric_content.strip()
+
+            if numeric_format == "ixt:num-dot-decimal":
+                numeric_text = numeric_text.replace(",", "")
+            elif numeric_format == "ixt-sec:numwordsen":
+                numeric_words = {
+                    "one": "1",
+                    "two": "2",
+                }
+
+                try:
+                    numeric_text = numeric_words[
+                        numeric_text.lower()
+                    ]
+                except KeyError as exc:
+                    raise FinancialFactValidationError(
+                        "financial fact has invalid numeric content"
+                    ) from exc
+
+            try:
+                value = Decimal(numeric_text)
+            except InvalidOperation as exc:
+                raise FinancialFactValidationError(
+                    "financial fact has invalid numeric content"
+                ) from exc
+
+            scale = element.get("scale")
+
+            if scale is not None:
+                try:
+                    scale_value = int(scale)
+                except ValueError as exc:
+                    raise FinancialFactValidationError(
+                        "financial fact has invalid scale"
+                    ) from exc
+
+                value *= Decimal(10) ** scale_value
 
         fact = ExtractedFinancialFact(
             concept=concept,
