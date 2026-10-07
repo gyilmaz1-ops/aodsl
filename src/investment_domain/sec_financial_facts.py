@@ -89,9 +89,10 @@ def validate_extracted_financial_fact(
                 "each dimension must contain two non-empty strings"
             )
 
-    if len(set(fact.dimensions)) != len(fact.dimensions):
+    dimension_axes = tuple(dimension for dimension, _ in fact.dimensions)
+    if len(set(dimension_axes)) != len(dimension_axes):
         raise FinancialFactValidationError(
-            "dimensions must be unique"
+            "dimension axes must be unique"
         )
 
     if fact.dimensions != tuple(sorted(fact.dimensions)):
@@ -106,6 +107,7 @@ import xml.etree.ElementTree as ET
 
 _IX_NS = "http://www.xbrl.org/2013/inlineXBRL"
 _XBRLI_NS = "http://www.xbrl.org/2003/instance"
+_XBRLDI_NS = "http://xbrl.org/2006/xbrldi"
 
 
 def _date_utc(value: str) -> datetime:
@@ -156,9 +158,22 @@ def extract_financial_facts_from_ixbrl(
         ):
             continue
 
+        dimensions = tuple(
+            sorted(
+                (
+                    member.get("dimension") or "",
+                    (member.text or "").strip(),
+                )
+                for member in context.iter(
+                    f"{{{_XBRLDI_NS}}}explicitMember"
+                )
+            )
+        )
+
         contexts[context_id] = (
             _date_utc(start.text),
             _date_utc(end.text),
+            dimensions,
         )
 
     facts = []
@@ -220,7 +235,7 @@ def extract_financial_facts_from_ixbrl(
             period_start=period[0],
             period_end=period[1],
             context_id=context_id,
-            dimensions=(),
+            dimensions=period[2],
             decimals=element.get("decimals"),
         )
 

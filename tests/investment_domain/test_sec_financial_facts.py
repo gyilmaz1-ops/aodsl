@@ -506,3 +506,245 @@ def test_same_concept_and_context_with_different_unit_is_not_duplicate():
 
     assert len(facts) == 2
     assert facts[0].unit_ref != facts[1].unit_ref
+
+
+def test_context_explicit_member_dimension_is_preserved():
+    dimensional = MINIMAL_IXBRL.replace(
+        """      <xbrli:entity>
+        <xbrli:identifier scheme="http://www.sec.gov/CIK">
+          0000123456
+        </xbrli:identifier>
+      </xbrli:entity>""",
+        """      <xbrli:entity>
+        <xbrli:identifier scheme="http://www.sec.gov/CIK">
+          0000123456
+        </xbrli:identifier>
+        <xbrli:segment>
+          <xbrldi:explicitMember
+            dimension="us-gaap:ProductAxis">example:Widgets</xbrldi:explicitMember>
+        </xbrli:segment>
+      </xbrli:entity>""",
+    ).replace(
+        'xmlns:us-gaap="http://fasb.org/us-gaap/2026">',
+        """xmlns:us-gaap="http://fasb.org/us-gaap/2026"
+ xmlns:xbrldi="http://xbrl.org/2006/xbrldi"
+ xmlns:example="http://example.com/2026">""",
+    )
+
+    facts = extract_financial_facts_from_ixbrl(dimensional)
+
+    assert len(facts) == 1
+    assert facts[0].dimensions == (
+        ("us-gaap:ProductAxis", "example:Widgets"),
+    )
+
+
+
+def _ixbrl_with_explicit_members(members):
+    member_xml = "\n".join(
+        (
+            '          <xbrldi:explicitMember '
+            f'dimension="{dimension}">'
+            f'{member}</xbrldi:explicitMember>'
+        )
+        for dimension, member in members
+    )
+
+    return MINIMAL_IXBRL.replace(
+        '''      <xbrli:entity>
+        <xbrli:identifier scheme="http://www.sec.gov/CIK">
+          0000123456
+        </xbrli:identifier>
+      </xbrli:entity>''',
+        f'''      <xbrli:entity>
+        <xbrli:identifier scheme="http://www.sec.gov/CIK">
+          0000123456
+        </xbrli:identifier>
+        <xbrli:segment>
+{member_xml}
+        </xbrli:segment>
+      </xbrli:entity>''',
+    ).replace(
+        'xmlns:us-gaap="http://fasb.org/us-gaap/2026">',
+        '''xmlns:us-gaap="http://fasb.org/us-gaap/2026"
+ xmlns:xbrldi="http://xbrl.org/2006/xbrldi"
+ xmlns:example="http://example.com/2026">''',
+    )
+
+
+def test_multiple_explicit_member_dimensions_are_canonicalized():
+    dimensional = _ixbrl_with_explicit_members(
+        [
+            ("us-gaap:ProductAxis", "example:Widgets"),
+            ("us-gaap:GeographyAxis", "example:Europe"),
+        ]
+    )
+
+    facts = extract_financial_facts_from_ixbrl(dimensional)
+
+    assert facts[0].dimensions == (
+        ("us-gaap:GeographyAxis", "example:Europe"),
+        ("us-gaap:ProductAxis", "example:Widgets"),
+    )
+
+
+def test_blank_explicit_member_dimension_fails_closed():
+    dimensional = _ixbrl_with_explicit_members(
+        [
+            ("", "example:Widgets"),
+        ]
+    )
+
+    with pytest.raises(FinancialFactValidationError):
+        extract_financial_facts_from_ixbrl(dimensional)
+
+
+def test_blank_explicit_member_value_fails_closed():
+    dimensional = _ixbrl_with_explicit_members(
+        [
+            ("us-gaap:ProductAxis", ""),
+        ]
+    )
+
+    with pytest.raises(FinancialFactValidationError):
+        extract_financial_facts_from_ixbrl(dimensional)
+
+
+def test_duplicate_explicit_member_dimension_fails_closed():
+    dimensional = _ixbrl_with_explicit_members(
+        [
+            ("us-gaap:ProductAxis", "example:Widgets"),
+            ("us-gaap:ProductAxis", "example:Gadgets"),
+        ]
+    )
+
+    with pytest.raises(FinancialFactValidationError):
+        extract_financial_facts_from_ixbrl(dimensional)
+
+def test_conflicting_duplicate_in_dimensional_context_fails_closed():
+    dimensional = _ixbrl_with_explicit_members(
+        [
+            ("us-gaap:ProductAxis", "example:Widgets"),
+        ]
+    )
+
+    conflicting = dimensional.replace(
+        """    <ix:nonFraction
+      name="us-gaap:Revenues"
+      contextRef="FY2026"
+      unitRef="USD"
+      decimals="-3">1000000</ix:nonFraction>""",
+        """    <ix:nonFraction
+      name="us-gaap:Revenues"
+      contextRef="FY2026"
+      unitRef="USD"
+      decimals="-3">1000000</ix:nonFraction>
+
+    <ix:nonFraction
+      name="us-gaap:Revenues"
+      contextRef="FY2026"
+      unitRef="USD"
+      decimals="-3">2000000</ix:nonFraction>""",
+    )
+
+    with pytest.raises(
+        FinancialFactValidationError,
+        match="conflicting duplicate financial fact",
+    ):
+        extract_financial_facts_from_ixbrl(conflicting)
+
+
+def test_identical_duplicate_in_dimensional_context_preserves_dimensions():
+    dimensional = _ixbrl_with_explicit_members(
+        [
+            ("us-gaap:ProductAxis", "example:Widgets"),
+        ]
+    )
+
+    duplicate = dimensional.replace(
+        """    <ix:nonFraction
+      name="us-gaap:Revenues"
+      contextRef="FY2026"
+      unitRef="USD"
+      decimals="-3">1000000</ix:nonFraction>""",
+        """    <ix:nonFraction
+      name="us-gaap:Revenues"
+      contextRef="FY2026"
+      unitRef="USD"
+      decimals="-3">1000000</ix:nonFraction>
+
+    <ix:nonFraction
+      name="us-gaap:Revenues"
+      contextRef="FY2026"
+      unitRef="USD"
+      decimals="-3">1000000</ix:nonFraction>""",
+    )
+
+    facts = extract_financial_facts_from_ixbrl(duplicate)
+
+    assert len(facts) == 2
+    assert facts[0].value == facts[1].value
+    assert facts[0].dimensions == (
+        ("us-gaap:ProductAxis", "example:Widgets"),
+    )
+    assert facts[1].dimensions == facts[0].dimensions
+
+def test_different_dimensional_contexts_are_independent_fact_identities():
+    dimensional = _ixbrl_with_explicit_members(
+        [
+            ("us-gaap:ProductAxis", "example:Widgets"),
+        ]
+    )
+
+    expanded = dimensional.replace(
+        """  <xbrli:unit id="USD">""",
+        """  <xbrli:context id="FY2025">
+    <xbrli:entity>
+      <xbrli:identifier scheme="http://www.sec.gov/CIK">
+        0000123456
+      </xbrli:identifier>
+      <xbrli:segment>
+        <xbrldi:explicitMember
+          dimension="us-gaap:ProductAxis">example:Gadgets</xbrldi:explicitMember>
+      </xbrli:segment>
+    </xbrli:entity>
+    <xbrli:period>
+      <xbrli:startDate>2025-01-01</xbrli:startDate>
+      <xbrli:endDate>2025-12-31</xbrli:endDate>
+    </xbrli:period>
+  </xbrli:context>
+
+  <xbrli:unit id="USD">""",
+        1,
+    ).replace(
+        """    <ix:nonFraction
+      name="us-gaap:Revenues"
+      contextRef="FY2026"
+      unitRef="USD"
+      decimals="-3">1000000</ix:nonFraction>""",
+        """    <ix:nonFraction
+      name="us-gaap:Revenues"
+      contextRef="FY2026"
+      unitRef="USD"
+      decimals="-3">1000000</ix:nonFraction>
+
+    <ix:nonFraction
+      name="us-gaap:Revenues"
+      contextRef="FY2025"
+      unitRef="USD"
+      decimals="-3">2000000</ix:nonFraction>""",
+        1,
+    )
+
+    facts = extract_financial_facts_from_ixbrl(expanded)
+
+    assert len(facts) == 2
+    assert facts[0].context_id == "FY2026"
+    assert facts[0].dimensions == (
+        ("us-gaap:ProductAxis", "example:Widgets"),
+    )
+    assert facts[1].context_id == "FY2025"
+    assert facts[1].dimensions == (
+        ("us-gaap:ProductAxis", "example:Gadgets"),
+    )
+    assert facts[0].value != facts[1].value
