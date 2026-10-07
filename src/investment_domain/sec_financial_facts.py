@@ -299,6 +299,10 @@ def extract_financial_facts_from_ixbrl(
 
                 value *= Decimal(10) ** scale_value
 
+            sign = element.get("sign")
+            if sign == "-":
+                value = -value
+
         fact = ExtractedFinancialFact(
             concept=concept,
             value=value,

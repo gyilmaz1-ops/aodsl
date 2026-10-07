@@ -1158,3 +1158,51 @@ def test_unknown_numwordsen_value_fails_closed():
         match="financial fact has invalid numeric content",
     ):
         extract_financial_facts_from_ixbrl(raw)
+
+
+def test_negative_sign_attribute_is_applied():
+    ixbrl = """
+    <html
+      xmlns:ix="http://www.xbrl.org/2013/inlineXBRL"
+      xmlns:xbrli="http://www.xbrl.org/2003/instance"
+      xmlns:us-gaap="http://fasb.org/us-gaap/2025"
+    >
+      <body>
+        <xbrli:context id="FY2026">
+          <xbrli:entity>
+            <xbrli:identifier scheme="test">
+              TEST
+            </xbrli:identifier>
+          </xbrli:entity>
+          <xbrli:period>
+            <xbrli:startDate>
+              2025-01-01
+            </xbrli:startDate>
+            <xbrli:endDate>
+              2025-12-31
+            </xbrli:endDate>
+          </xbrli:period>
+        </xbrli:context>
+
+        <xbrli:unit id="USD">
+          <xbrli:measure>
+            iso4217:USD
+          </xbrli:measure>
+        </xbrli:unit>
+
+        <ix:nonFraction
+          name="us-gaap:OperatingIncomeLoss"
+          contextRef="FY2026"
+          unitRef="USD"
+          scale="6"
+          format="ixt:num-dot-decimal"
+          sign="-"
+        >42,627</ix:nonFraction>
+      </body>
+    </html>
+    """
+
+    facts = extract_financial_facts_from_ixbrl(ixbrl)
+
+    assert len(facts) == 1
+    assert facts[0].value == Decimal("-42627000000")
