@@ -18,7 +18,21 @@ HASH_ALGORITHM = "sha256"
 WORKFLOW_PATH = ".github/workflows/production-release.yml"
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
-TAG = re.compile(r"^v[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$")
+SEMVER_CORE = r"(?:0|[1-9][0-9]*)"
+SEMVER_PRERELEASE_ID = (
+    r"(?:0|[1-9][0-9]*|"
+    r"[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)"
+)
+SEMVER_BUILD_ID = r"[0-9A-Za-z-]+"
+
+TAG = re.compile(
+    rf"^v{SEMVER_CORE}\.{SEMVER_CORE}\.{SEMVER_CORE}"
+    rf"(?:-{SEMVER_PRERELEASE_ID}"
+    rf"(?:\.{SEMVER_PRERELEASE_ID})*)?"
+    rf"(?:\+{SEMVER_BUILD_ID}"
+    rf"(?:\.{SEMVER_BUILD_ID})*)?$"
+)
+
 REPOSITORY = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 
 
