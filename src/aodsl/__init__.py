@@ -1,5 +1,5 @@
 """AODSL 1.0 public API."""
-__version__="1.0.9"
+__version__="1.0.10"
 
 from .compiler import AODSLCompiler, Lexer, Parser
 from .runtime import RuleEngine, MemoryGraph

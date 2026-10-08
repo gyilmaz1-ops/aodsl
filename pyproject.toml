@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aodsl"
-version = "1.0.9"
+version = "1.0.10"
 description = "Deterministic orchestration DSL and control plane"
 requires-python = ">=3.10"
 dependencies = []
