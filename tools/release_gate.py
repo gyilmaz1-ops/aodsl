@@ -111,15 +111,61 @@ if production:
 # 6) Build deterministic source release artifact + manifest.
 dist=ROOT/"dist"; dist.mkdir(exist_ok=True)
 artifact=dist/f"aodsl-{pv}{'-production' if production else ''}-source.zip"
-files=sorted(p for p in ROOT.rglob("*") if p.is_file()
-             and "dist" not in p.parts and "__pycache__" not in p.parts
-             and ".pytest_cache" not in p.parts and ".git" not in p.parts)
-with zipfile.ZipFile(artifact,"w",zipfile.ZIP_DEFLATED) as z:
-    for p in files:
-        zi=zipfile.ZipInfo(str(p.relative_to(ROOT)))
-        zi.date_time=(1980,1,1,0,0,0)
-        zi.external_attr=0o644<<16
-        z.writestr(zi,p.read_bytes())
+# Bind archive membership and content to the committed Git tree.
+tree_data = subprocess.check_output(
+    ["git", "ls-tree", "-r", "-z", "HEAD"],
+    cwd=ROOT,
+)
+files = []
+
+for record in tree_data.split(b"\x00"):
+    if not record:
+        continue
+
+    metadata, separator, raw_path = record.partition(b"\x09")
+    if not separator:
+        raise RuntimeError("INVALID_GIT_TREE_RECORD")
+
+    fields = metadata.decode("ascii").split()
+    if len(fields) != 3:
+        raise RuntimeError("INVALID_GIT_TREE_METADATA")
+
+    mode, kind, object_id = fields
+
+    if kind != "blob" or mode not in ("100644", "100755"):
+        raise RuntimeError("UNSUPPORTED_GIT_TREE_ENTRY")
+
+    name = raw_path.decode("utf-8")
+
+    if (
+        not name
+        or name.startswith("/")
+        or chr(92) in name
+        or chr(0) in name
+        or any(
+            part in ("", ".", "..")
+            for part in name.split("/")
+        )
+    ):
+        raise RuntimeError("UNSAFE_GIT_TREE_PATH")
+
+    files.append((name, object_id, mode))
+
+files.sort(key=lambda item: item[0])
+
+with zipfile.ZipFile(artifact, "w", zipfile.ZIP_DEFLATED) as z:
+    for name, object_id, mode in files:
+        data = subprocess.check_output(
+            ["git", "cat-file", "blob", object_id],
+            cwd=ROOT,
+        )
+        zi = zipfile.ZipInfo(name)
+        zi.compress_type = zipfile.ZIP_DEFLATED
+        zi.date_time = (1980, 1, 1, 0, 0, 0)
+        zi.create_system = 3
+        permissions = 0o755 if mode == "100755" else 0o644
+        zi.external_attr = (0o100000 | permissions) << 16
+        z.writestr(zi, data)
 digest=hashlib.sha256(artifact.read_bytes()).hexdigest()
 manifest={"version":pv,"mode":"production" if production else "source",
           "artifact":artifact.name,"sha256":digest,"files":len(files)}
