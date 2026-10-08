@@ -38,6 +38,7 @@ class MultiWorkerOutboxStore(mw.MultiWorkerSQLiteExecutionStore):
     def __init__(self,db_path,clock=None):
         super().__init__(db_path,clock)
         self._migrate_outbox()
+        self._migrate_specialist_results()
 
     def _migrate_outbox(self):
         cols={
@@ -158,6 +159,95 @@ class MultiWorkerOutboxStore(mw.MultiWorkerSQLiteExecutionStore):
     def outbox_row(self,oid):
         with self.connect() as con:
             return con.execute("SELECT * FROM outbox WHERE outbox_id=?",(oid,)).fetchone()
+
+
+
+    def persist_specialist_result_and_ack(self, lease, result):
+        from investment_domain.agents import (
+            AgentResult,
+            validate_agent_result,
+        )
+
+        if not isinstance(result, AgentResult):
+            raise TypeError("result must be AgentResult")
+
+        validate_agent_result(result)
+
+        now = self.clock()
+
+        with self.tx() as con:
+            self._assert_outbox_fence(con, lease)
+
+            from investment_domain.specialist_outbox_binding import (
+                bind_specialist_outbox_dispatch,
+            )
+            from investment_domain.agent_orchestration import (
+                validate_orchestrated_result,
+            )
+
+            durable_row = con.execute(
+                "SELECT * FROM outbox WHERE outbox_id=?",
+                (lease.outbox_id,),
+            ).fetchone()
+
+            if durable_row is None:
+                raise ValueError("durable outbox row missing")
+
+            request = bind_specialist_outbox_dispatch(
+                dict(durable_row),
+                lease,
+                lease.payload,
+            )
+
+            validate_orchestrated_result(request, result)
+
+            con.execute("""
+                INSERT INTO specialist_agent_results (
+                    outbox_id,
+                    result_id,
+                    request_id,
+                    capability,
+                    output_object_ids_json,
+                    provenance_object_ids_json,
+                    created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (
+                lease.outbox_id,
+                result.result_id,
+                result.request_id,
+                result.capability.value,
+                json.dumps(result.output_object_ids),
+                json.dumps(result.provenance_object_ids),
+                now,
+            ))
+
+            con.execute("""
+                UPDATE outbox
+                SET status='DISPATCHED',
+                    dispatched_at=?,
+                    lease_owner=NULL,
+                    lease_expires_at=NULL,
+                    updated_at=?
+                WHERE outbox_id=?
+            """, (now, now, lease.outbox_id))
+
+
+    def _migrate_specialist_results(self):
+        with self.connect() as con:
+            con.execute("""
+                CREATE TABLE IF NOT EXISTS specialist_agent_results (
+                    outbox_id INTEGER PRIMARY KEY,
+                    result_id TEXT NOT NULL UNIQUE,
+                    request_id TEXT NOT NULL,
+                    capability TEXT NOT NULL,
+                    output_object_ids_json TEXT NOT NULL,
+                    provenance_object_ids_json TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    FOREIGN KEY(outbox_id)
+                        REFERENCES outbox(outbox_id)
+                )
+            """)
+
 
 
 class IdempotentReceiver:

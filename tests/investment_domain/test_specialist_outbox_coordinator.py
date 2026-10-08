@@ -198,3 +198,124 @@ def test_stale_worker_cannot_ack_after_ownership_transfer(tmp_path):
     row = controlled_store.outbox_row(outbox_id)
     assert row["status"] == "SENDING"
     assert row["lease_owner"] == "WORKER-NEW"
+
+
+def test_persistence_exception_does_not_fail_dispatch(tmp_path, monkeypatch):
+    import sqlite3
+
+    store, outbox_id = seeded_store(tmp_path)
+
+    fail_calls = []
+
+    def unexpected_fail_dispatch(*args, **kwargs):
+        fail_calls.append((args, kwargs))
+        raise AssertionError("fail_dispatch must not be called")
+
+    def injected_persistence_failure(*args, **kwargs):
+        raise sqlite3.OperationalError(
+            "INJECTED_COORDINATOR_PERSISTENCE_FAILURE"
+        )
+
+    monkeypatch.setattr(
+        store,
+        "fail_dispatch",
+        unexpected_fail_dispatch,
+    )
+    monkeypatch.setattr(
+        store,
+        "persist_specialist_result_and_ack",
+        injected_persistence_failure,
+    )
+
+    with pytest.raises(
+        sqlite3.OperationalError,
+        match="INJECTED_COORDINATOR_PERSISTENCE_FAILURE",
+    ):
+        dispatch_specialist_outbox_once(
+            store,
+            "WORKER-1",
+            valid_result,
+        )
+
+    assert fail_calls == []
+
+    row = store.outbox_row(outbox_id)
+    assert row["status"] == "SENDING"
+    assert row["lease_owner"] == "WORKER-1"
+
+    with store.connect() as con:
+        count = con.execute(
+            "SELECT COUNT(*) FROM specialist_agent_results"
+        ).fetchone()[0]
+
+    assert count == 0
+
+
+def test_stale_coordinator_cannot_mutate_new_worker_lease(tmp_path):
+    from aodsl.multiworker import ManualClock
+    from aodsl.runtime import AODSLError
+
+    clock = ManualClock()
+
+    store = MultiWorkerOutboxStore(
+        str(tmp_path / "coordinator-c14-fencing.db"),
+        clock,
+    )
+
+    dispatch = envelope()
+
+    store.append_event(_event(dispatch["event_id"]))
+    event_lease = store.claim_next_event("EVENT-WORKER", 30)
+    assert event_lease is not None
+    store.commit_event(event_lease)
+
+    outbox_id = store.enqueue_outbox(
+        event_id=dispatch["event_id"],
+        plan_hash=dispatch["plan_hash"],
+        capability=dispatch["capability"],
+        provider=dispatch["provider"],
+        target=dispatch["target"],
+        reason="SPECIALIST_DISPATCH",
+        payload=dispatch,
+        idempotency_key="SPECIALIST-C14-FENCING",
+        max_attempts=3,
+    )
+
+    new_lease_holder = []
+
+    def execute_after_transfer(request):
+        clock.advance(6)
+
+        new_lease = store.claim_next_outbox(
+            "WORKER-NEW",
+            lease_seconds=30,
+        )
+
+        assert new_lease is not None
+        new_lease_holder.append(new_lease)
+
+        return valid_result(request)
+
+    with pytest.raises(AODSLError) as error:
+        dispatch_specialist_outbox_once(
+            store,
+            "WORKER-OLD",
+            execute_after_transfer,
+            lease_seconds=5,
+        )
+
+    assert error.value.code == "AODSL-R411"
+    assert len(new_lease_holder) == 1
+
+    row = store.outbox_row(outbox_id)
+
+    assert row["status"] == "SENDING"
+    assert row["lease_owner"] == "WORKER-NEW"
+    assert row["lease_version"] == new_lease_holder[0].lease_version
+
+    with store.connect() as con:
+        count = con.execute(
+            "SELECT COUNT(*) FROM specialist_agent_results"
+        ).fetchone()[0]
+
+    assert count == 0

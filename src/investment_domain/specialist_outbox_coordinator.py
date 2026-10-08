@@ -69,5 +69,8 @@ def dispatch_specialist_outbox_once(
             "specialist dispatch failed"
         ) from exc
 
-    store.ack_dispatched(lease)
+    store.persist_specialist_result_and_ack(
+        lease,
+        validated,
+    )
     return validated
