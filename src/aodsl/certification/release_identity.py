@@ -5,6 +5,8 @@ import json
 import re
 from pathlib import Path
 
+from aodsl.certification.version_policy import artifact_names
+
 from aodsl.certification.certified_bundle import (
     BUNDLE_MANIFEST_PATH,
     HASH_ALGORITHM as BUNDLE_HASH_ALGORITHM,
@@ -60,7 +62,17 @@ def build_release_identity(
     git_tag: str,
     repository: str,
     workflow_ref: str,
+    version: str | None = None,
 ) -> dict:
+    if version is not None:
+        expected_artifact, expected_sbom = artifact_names(version)
+        if Path(artifact_path).name != expected_artifact:
+            raise ValueError('release artifact version/name mismatch')
+        if Path(sbom_path).name != expected_sbom:
+            raise ValueError('release SBOM version/name mismatch')
+        if git_tag != f'v{version}':
+            raise ValueError('git tag version mismatch')
+
     root = Path(root).resolve()
     artifact_path = Path(artifact_path).resolve()
     certification_manifest_path = Path(certification_manifest_path).resolve()
@@ -197,9 +209,12 @@ def build_release_identity(
         bundle_root / BUNDLE_MANIFEST_PATH
     ).resolve()
 
+    if version is None:
+        version = '1.0.0'
     bundle_errors = verify_certified_bundle_manifest(
         bundle_root,
         staged_bundle_manifest_path,
+        version=version,
     )
     if bundle_errors:
         raise ValueError(
@@ -306,6 +321,7 @@ def verify_release_identity(
     git_tag: str,
     repository: str,
     workflow_ref: str,
+    version: str | None = None,
 ) -> list[str]:
     try:
         stored = json.loads(Path(identity_path).read_text())
@@ -321,6 +337,7 @@ def verify_release_identity(
             git_tag=git_tag,
             repository=repository,
             workflow_ref=workflow_ref,
+                version=version,
         )
     except Exception as exc:
         return [str(exc)]

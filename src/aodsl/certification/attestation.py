@@ -1,6 +1,7 @@
 from __future__ import annotations
 import hashlib,json
 from pathlib import Path
+from aodsl.certification.version_policy import read_project_version
 SCHEMA="aodsl.production-certification.v1"; HASH_ALGORITHM="sha256"
 EXCLUDED_DIRS={".git",".pytest_cache","__pycache__",".mypy_cache",".ruff_cache",".venv","venv","dist","build"}
 EXCLUDED_FILES={"certification/production-certification-manifest.json","certification/production-certification-attestation.json","certification/evidence/live-certification-status.json"}
@@ -26,8 +27,8 @@ def source_tree_entries(root):
   if r not in seen and not _excluded(r): seen.add(r); out.append({"path":r,"sha256":sha256_file(p)})
  return out
 def load_json(p): return json.loads(Path(p).read_text())
-def validate_live_evidence(e):
- req={"schema":"aodsl.live-certification.v1","version":"1.0.0","architecture":"PASSED","operations":"CERTIFIED","cert_pg_001":"CERTIFIED","production_deployment":"CERTIFIED"}
+def validate_live_evidence(e, expected_version):
+ req={"schema":"aodsl.live-certification.v1","version":expected_version,"architecture":"PASSED","operations":"CERTIFIED","cert_pg_001":"CERTIFIED","production_deployment":"CERTIFIED"}
  for k,v in req.items():
   if e.get(k)!=v: raise ValueError(f"live evidence {k}: expected {v!r}, got {e.get(k)!r}")
  pg=e.get("postgres")
@@ -38,7 +39,7 @@ def invariant_ids(reg):
  return ids
 def build_manifest(root,evidence_path):
  root=Path(root); rp=root/"architecture/invariants.v1.json"; reg=load_json(rp); ev=load_json(evidence_path)
- validate_live_evidence(ev); ids=invariant_ids(reg); entries=source_tree_entries(root)
+ validate_live_evidence(ev, read_project_version(root / 'pyproject.toml')); ids=invariant_ids(reg); entries=source_tree_entries(root)
  current_source_sha=sha256_bytes(canonical_json_bytes(entries))
  tested_source_sha=ev.get("tested_source_tree_sha256")
  if tested_source_sha != current_source_sha: raise ValueError(f"INV-049 source binding mismatch: tested={tested_source_sha!r}, current={current_source_sha!r}")

@@ -20,12 +20,54 @@ def run(cmd, expect=0, timeout=180, env=None):
     return r
 
 # 1) Version consistency.
-pyproject=(ROOT/"pyproject.toml").read_text()
-init=(ROOT/"src/aodsl/__init__.py").read_text()
-pv=re.search(r'(?m)^version = "([^"]+)"',pyproject).group(1)
-iv=re.search(r'__version__="([^"]+)"',init).group(1)
-assert pv==iv=="1.0.0",(pv,iv)
-print("VERSION CONSISTENCY: PASSED",pv)
+from aodsl.certification.version_policy import (
+    read_project_version,
+    validate_git_release_identity,
+    validate_release_version,
+)
+from aodsl import __version__ as runtime_version
+from investment_domain import __version__ as investment_version
+
+production = "--production" in sys.argv[1:]
+pv = read_project_version(ROOT / "pyproject.toml")
+
+if production:
+    ref_type = os.environ.get("GITHUB_REF_TYPE", "").strip()
+    git_tag = os.environ.get("GITHUB_REF_NAME", "").strip()
+    if ref_type != "tag" or not git_tag:
+        raise SystemExit(
+            "VERSION-011: production release requires a Git tag"
+        )
+
+    github_sha = os.environ.get("GITHUB_SHA", "").strip()
+    if not github_sha:
+        raise SystemExit(
+            "VERSION-012: production release requires GITHUB_SHA"
+        )
+
+    try:
+        validate_git_release_identity(
+            repository_root=ROOT,
+            git_tag=git_tag,
+            github_ref_type=ref_type,
+            github_sha=github_sha,
+        )
+    except ValueError as exc:
+        raise SystemExit(f"VERSION-012: {exc}") from exc
+else:
+    git_tag = f"v{pv}"
+
+try:
+    validate_release_version(
+        package_version=pv,
+        runtime_version=runtime_version,
+        investment_version=investment_version,
+        git_tag=git_tag,
+    )
+except ValueError as exc:
+    raise SystemExit(f"VERSION-011: {exc}") from exc
+
+print("VERSION CONSISTENCY: PASSED", pv)
 
 run([sys.executable,str(ROOT/"tools/architecture_freeze_gate.py")])
 

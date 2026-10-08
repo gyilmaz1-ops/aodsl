@@ -451,6 +451,29 @@ if scalar(final_job, "needs") != "reproducible-build":
 build = parse_steps(build_job)
 final = parse_steps(final_job)
 
+
+def require_checkout_full_history(steps, scope):
+    checkout_action = (
+        "actions/checkout@"
+        "11d5960a326750d5838078e36cf38b85af677262"
+    )
+
+    matches = [
+        step for step in steps
+        if step["uses"] == checkout_action
+    ]
+
+    if len(matches) != 1:
+        fail(f"{scope} must contain exactly one checkout step")
+
+    settings = matches[0]["with"]
+
+    if settings.get("fetch-depth") != "0":
+        fail(
+            f"{scope} checkout must use fetch-depth: 0"
+        )
+
+
 require_action(
     build,
     "actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
@@ -466,6 +489,9 @@ require_action(
     "actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
     "production-gate",
 )
+
+require_checkout_full_history(build, "reproducible-build")
+require_checkout_full_history(final, "production-gate")
 
 require_exec(
     build,
@@ -563,8 +589,8 @@ require_exec(
         "python tools/verify_production_dependencies.py",
         "python tools/verify_reproducible_artifacts.py",
         "--output dist/reproducibility-manifest.json",
-        "cp repro/a/aodsl-1.0.0-production-source.zip dist/",
-        "cp repro/a/aodsl-1.0.0.cdx.json dist/",
+        "cp repro/a/${AODSL_ARTIFACT} dist/",
+        "cp repro/a/${AODSL_SBOM} dist/",
         "cp repro/a/release-manifest.json dist/",
         "python tools/verify_sbom.py",
         "rm -rf dist/certified-bundle-stage",
@@ -599,11 +625,11 @@ final_order = [
     ),
     find_exec_step(
         final,
-        "cp repro/a/aodsl-1.0.0-production-source.zip dist/",
+        "cp repro/a/${AODSL_ARTIFACT} dist/",
     ),
     find_exec_step(
         final,
-        "cp repro/a/aodsl-1.0.0.cdx.json dist/",
+        "cp repro/a/${AODSL_SBOM} dist/",
     ),
     find_exec_step(
         final,

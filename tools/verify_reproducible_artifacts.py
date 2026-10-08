@@ -6,8 +6,17 @@ import hashlib
 import json
 from pathlib import Path
 
-ARTIFACT_NAME = "aodsl-1.0.0-production-source.zip"
-SBOM_NAME = "aodsl-1.0.0.cdx.json"
+from aodsl.certification.version_policy import (
+    artifact_names,
+    read_project_version,
+)
+
+# Backward-compatible release artifact names.
+PROJECT_VERSION = read_project_version(
+    Path(__file__).resolve().parents[1] / "pyproject.toml"
+)
+ARTIFACT_NAME, SBOM_NAME = artifact_names(PROJECT_VERSION)
+
 SCHEMA = "aodsl.reproducible-release-artifact.v1"
 
 
@@ -54,18 +63,27 @@ def compare_file(left: Path, right: Path, label: str) -> str:
 def verify_reproducible_artifacts(
     build_a: Path,
     build_b: Path,
+    *,
+    version: str | None = None,
 ) -> dict:
+    if version is None:
+        version = read_project_version(
+            Path(__file__).resolve().parents[1] / "pyproject.toml"
+        )
+
+    artifact_name, sbom_name = artifact_names(version)
+
     build_a = Path(build_a)
     build_b = Path(build_b)
 
     artifact_sha = compare_file(
-        build_a / ARTIFACT_NAME,
-        build_b / ARTIFACT_NAME,
+        build_a / artifact_name,
+        build_b / artifact_name,
         "production artifact",
     )
     sbom_sha = compare_file(
-        build_a / SBOM_NAME,
-        build_b / SBOM_NAME,
+        build_a / sbom_name,
+        build_b / sbom_name,
         "SBOM",
     )
 
@@ -78,11 +96,11 @@ def verify_reproducible_artifacts(
             "result": "IDENTICAL",
         },
         "artifact": {
-            "path": f"dist/{ARTIFACT_NAME}",
+            "path": f"dist/{artifact_name}",
             "sha256": artifact_sha,
         },
         "sbom": {
-            "path": f"dist/{SBOM_NAME}",
+            "path": f"dist/{sbom_name}",
             "sha256": sbom_sha,
         },
     }

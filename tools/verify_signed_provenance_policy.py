@@ -364,12 +364,12 @@ compare = find_exec_step(
 
 promote_zip = find_exec_step(
     final,
-    "cp repro/a/aodsl-1.0.0-production-source.zip dist/",
+    "cp repro/a/${AODSL_ARTIFACT} dist/",
 )
 
 promote_sbom = find_exec_step(
     final,
-    "cp repro/a/aodsl-1.0.0.cdx.json dist/",
+    "cp repro/a/${AODSL_SBOM} dist/",
 )
 
 find_exec_step(

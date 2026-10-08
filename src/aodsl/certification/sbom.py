@@ -6,6 +6,11 @@ import re
 from importlib import metadata
 from pathlib import Path
 
+from aodsl.certification.version_policy import (
+    artifact_names,
+    read_project_version,
+)
+
 SBOM_SCHEMA = "aodsl.sbom.v1"
 CYCLONEDX_FORMAT = "CycloneDX"
 CYCLONEDX_SPEC_VERSION = "1.6"
@@ -132,8 +137,23 @@ def verify_installed_dependencies(root: Path) -> list[str]:
     return errors
 
 
-def build_sbom(root: Path) -> dict:
+def build_sbom(
+    root: Path,
+    *,
+    version: str | None = None,
+) -> dict:
     root = Path(root).resolve()
+
+    if version is None:
+        pyproject = root / "pyproject.toml"
+        if pyproject.is_file():
+            version = read_project_version(pyproject)
+        else:
+            version = "1.0.0"
+
+    # Validate even explicitly supplied versions.
+    artifact_names(version)
+
     lock_path = root / LOCK_PATH
 
     components = parse_production_lock(lock_path)
@@ -146,7 +166,7 @@ def build_sbom(root: Path) -> dict:
             "component": {
                 "type": "application",
                 "name": "aodsl",
-                "version": "1.0.0",
+                "version": version,
             },
             "properties": [
                 {
@@ -182,8 +202,13 @@ def build_sbom(root: Path) -> dict:
     }
 
 
-def write_sbom(root: Path, output_path: Path) -> dict:
-    sbom = build_sbom(root)
+def write_sbom(
+    root: Path,
+    output_path: Path,
+    *,
+    version: str | None = None,
+) -> dict:
+    sbom = build_sbom(root, version=version)
 
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -196,10 +221,12 @@ def write_sbom(root: Path, output_path: Path) -> dict:
 def verify_sbom(
     root: Path,
     sbom_path: Path,
+    *,
+    version: str | None = None,
 ) -> list[str]:
     try:
         stored = json.loads(Path(sbom_path).read_text(encoding="utf-8"))
-        expected = build_sbom(root)
+        expected = build_sbom(root, version=version)
     except Exception as exc:
         return [str(exc)]
 

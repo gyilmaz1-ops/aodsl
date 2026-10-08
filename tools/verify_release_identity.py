@@ -5,6 +5,11 @@ import os
 from pathlib import Path
 
 from aodsl.certification.release_identity import verify_release_identity
+from aodsl.certification.version_policy import (
+    read_project_version,
+    artifact_names,
+    validate_artifact_binding,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 DIST = ROOT / "dist"
@@ -12,6 +17,14 @@ artifacts = sorted(DIST.glob("aodsl-*-production-source.zip"))
 if len(artifacts) != 1:
     print(f"INV-052: FAILED — expected exactly one production artifact, found {len(artifacts)}")
     raise SystemExit(2)
+version = read_project_version(ROOT / 'pyproject.toml')
+expected_artifact, expected_sbom = artifact_names(version)
+validate_artifact_binding(
+    pyproject_path=ROOT / 'pyproject.toml',
+    artifact_name=artifacts[0].name,
+    sbom_name=expected_sbom,
+)
+
 required = ["GITHUB_SHA", "GITHUB_REF_NAME", "GITHUB_REF_TYPE", "GITHUB_REPOSITORY"]
 missing = [x for x in required if not os.environ.get(x, "").strip()]
 if missing:
@@ -28,7 +41,7 @@ errors = verify_release_identity(
     DIST / "certified-release-identity.json",
     artifacts[0],
     ROOT / "certification/production-certification-manifest.json",
-    DIST / "aodsl-1.0.0.cdx.json",
+    DIST / expected_sbom,
     DIST / "reproducibility-manifest.json",
     DIST / "certified-bundle-stage",
     DIST / "certified-bundle-manifest.json",
@@ -36,6 +49,7 @@ errors = verify_release_identity(
     git_tag=tag,
     repository=repo,
     workflow_ref=workflow_ref,
+    version=version,
 )
 if errors:
     print("INV-052: FAILED")

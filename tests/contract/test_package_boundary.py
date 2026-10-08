@@ -12,7 +12,12 @@ assert not bad, f"Historical cross-imports remain: {bad}"
 
 sys.path.insert(0,str(ROOT/"src"))
 import aodsl
-assert aodsl.__version__=="1.0.0"
+from aodsl.certification.version_policy import read_project_version
+from investment_domain import __version__ as investment_version
+
+project_version = read_project_version(ROOT / "pyproject.toml")
+assert aodsl.__version__ == project_version
+assert investment_version == project_version
 for name in aodsl.__all__:
     assert hasattr(aodsl,name),name
 print("AODSL v1 PACKAGE BOUNDARY: PASSED")

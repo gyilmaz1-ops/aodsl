@@ -5,6 +5,8 @@ import json
 import stat
 from pathlib import Path, PurePosixPath
 
+from aodsl.certification.version_policy import artifact_names
+
 
 SCHEMA = "aodsl.certified-bundle.v1"
 INVARIANT = "INV-056"
@@ -22,6 +24,15 @@ REQUIRED_PAYLOAD_PATHS = (
     "certification/production-certification-attestation.json",
     "certification/evidence/live-certification-status.json",
 )
+
+
+def required_payload_paths(version: str) -> tuple[str, ...]:
+    artifact_name, sbom_name = artifact_names(version)
+    return (
+        f"dist/{artifact_name}",
+        f"dist/{sbom_name}",
+        *REQUIRED_PAYLOAD_PATHS[2:],
+    )
 
 
 class CertifiedBundleError(RuntimeError):
@@ -137,9 +148,11 @@ def _enumerate_actual_payload_paths(root: Path) -> list[str]:
     return actual
 
 
-def _verify_physical_closure(root: Path) -> None:
+def _verify_physical_closure(
+    root: Path, *, version: str = '1.0.0'
+) -> None:
     actual = _enumerate_actual_payload_paths(root)
-    expected = list(REQUIRED_PAYLOAD_PATHS)
+    expected = list(required_payload_paths(version))
 
     if set(actual) != set(expected):
         missing = sorted(set(expected) - set(actual))
@@ -170,14 +183,16 @@ def _entry(root: Path, relative_path: str) -> dict:
     }
 
 
-def build_certified_bundle_manifest(root: Path) -> dict:
+def build_certified_bundle_manifest(
+    root: Path, *, version: str = '1.0.0'
+) -> dict:
     root = _root(root)
 
-    _verify_physical_closure(root)
+    _verify_physical_closure(root, version=version)
 
     entries = [
         _entry(root, relative_path)
-        for relative_path in REQUIRED_PAYLOAD_PATHS
+        for relative_path in required_payload_paths(version)
     ]
 
     return {
@@ -196,6 +211,8 @@ def build_certified_bundle_manifest(root: Path) -> dict:
 def verify_certified_bundle_manifest(
     root: Path,
     manifest_path: Path,
+    *,
+    version: str = '1.0.0',
 ) -> list[str]:
     try:
         root = _root(root)
@@ -215,7 +232,7 @@ def verify_certified_bundle_manifest(
                 "certified bundle manifest missing"
             )
 
-        _verify_physical_closure(root)
+        _verify_physical_closure(root, version=version)
 
         stored = json.loads(
             manifest_path.read_text(encoding="utf-8")
@@ -282,7 +299,7 @@ def verify_certified_bundle_manifest(
                 "duplicate certified bundle payload path"
             )
 
-        expected_paths = list(REQUIRED_PAYLOAD_PATHS)
+        expected_paths = list(required_payload_paths(version))
 
         if set(declared_paths) != set(expected_paths):
             missing = sorted(
@@ -306,7 +323,9 @@ def verify_certified_bundle_manifest(
                 "certified bundle payload count mismatch"
             )
 
-        expected = build_certified_bundle_manifest(root)
+        expected = build_certified_bundle_manifest(
+            root, version=version
+        )
 
         for stored_entry, expected_entry in zip(
             payload,

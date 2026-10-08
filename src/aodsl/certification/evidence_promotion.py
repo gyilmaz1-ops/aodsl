@@ -6,12 +6,12 @@ import tempfile
 from pathlib import Path
 
 from aodsl.certification.source_binding import canonical_source_tree_sha256
+from aodsl.certification.version_policy import read_project_version
 
 SCHEMA = "aodsl.live-certification.v1"
-VERSION = "1.0.0"
 
 
-def normalize_live_evidence(raw: dict) -> dict:
+def normalize_live_evidence(raw: dict, version: str) -> dict:
     try:
         architecture = raw["architecture"]["status"]
         operations = raw["operations"]["status"]
@@ -37,7 +37,7 @@ def normalize_live_evidence(raw: dict) -> dict:
 
     return {
         "schema": SCHEMA,
-        "version": VERSION,
+        "version": version,
         "architecture": architecture,
         "operations": operations,
         "cert_pg_001": postgres["status"],
@@ -67,7 +67,8 @@ def _atomic_json_write(path: Path, value: dict) -> None:
 def promote_live_evidence(root: Path, raw_path: Path, canonical_path: Path, raw_archive_path: Path) -> dict:
     root = Path(root)
     raw = json.loads(Path(raw_path).read_text())
-    canonical = normalize_live_evidence(raw)
+    version = read_project_version(root / 'pyproject.toml')
+    canonical = normalize_live_evidence(raw, version)
     current_sha = canonical_source_tree_sha256(root)
     if canonical["tested_source_tree_sha256"] != current_sha:
         raise ValueError(

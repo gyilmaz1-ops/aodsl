@@ -17,7 +17,7 @@ def raw(sha="a" * 64, production="CERTIFIED"):
 
 
 def test_normalizes_raw_to_canonical_schema():
-    c = ep.normalize_live_evidence(raw())
+    c = ep.normalize_live_evidence(raw(), "1.0.0")
     assert c["schema"] == "aodsl.live-certification.v1"
     assert c["production_deployment"] == "CERTIFIED"
     assert c["cert_pg_001"] == "CERTIFIED"
@@ -25,10 +25,11 @@ def test_normalizes_raw_to_canonical_schema():
 
 def test_rejects_non_certified_raw():
     with pytest.raises(ValueError, match="not promotable"):
-        ep.normalize_live_evidence(raw(production="NOT_CERTIFIED"))
+        ep.normalize_live_evidence(raw(production="NOT_CERTIFIED"), "1.0.0")
 
 
 def test_source_mismatch_does_not_replace_existing_evidence(tmp_path, monkeypatch):
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "aodsl"\nversion = "1.0.0"\n')
     rp = tmp_path / "raw.json"; cp = tmp_path / "canonical.json"; ap = tmp_path / "archive.json"
     rp.write_text(json.dumps(raw("a" * 64)))
     cp.write_text('{"sentinel":"old"}\n')
@@ -40,6 +41,7 @@ def test_source_mismatch_does_not_replace_existing_evidence(tmp_path, monkeypatc
 
 
 def test_success_replaces_canonical_and_archives_raw(tmp_path, monkeypatch):
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "aodsl"\nversion = "1.0.0"\n')
     rp = tmp_path / "raw.json"; cp = tmp_path / "canonical.json"; ap = tmp_path / "archive.json"
     r = raw("c" * 64); rp.write_text(json.dumps(r)); cp.write_text('{"sentinel":"old"}\n')
     monkeypatch.setattr(ep, "canonical_source_tree_sha256", lambda root: "c" * 64)

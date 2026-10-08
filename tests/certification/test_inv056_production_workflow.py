@@ -42,7 +42,7 @@ def test_inv056_final_gate_orders_closure_before_identity():
         "python tools/verify_reproducible_artifacts.py"
     )
     promote = final.index(
-        "cp repro/a/aodsl-1.0.0-production-source.zip dist/"
+        "cp repro/a/${AODSL_ARTIFACT} dist/"
     )
     sbom_verify = final.index("python tools/verify_sbom.py")
     stage = final.index("rm -rf dist/certified-bundle-stage")
@@ -85,8 +85,8 @@ def test_inv056_stage_copies_exact_seven_payloads():
     block = final[start:end]
 
     expected_sources = (
-        "dist/aodsl-1.0.0-production-source.zip",
-        "dist/aodsl-1.0.0.cdx.json",
+        "dist/${AODSL_ARTIFACT}",
+        "dist/${AODSL_SBOM}",
         "dist/release-manifest.json",
         "dist/reproducibility-manifest.json",
         "certification/production-certification-manifest.json",

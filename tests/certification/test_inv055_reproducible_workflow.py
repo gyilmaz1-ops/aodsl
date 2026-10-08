@@ -113,8 +113,8 @@ def test_inv055_final_gate_compares_then_promotes_without_rebuild():
     assert "python tools/release_gate.py --production" not in final
     assert "python tools/create_sbom.py" not in final
 
-    assert "cp repro/a/aodsl-1.0.0-production-source.zip dist/" in final
-    assert "cp repro/a/aodsl-1.0.0.cdx.json dist/" in final
+    assert "cp repro/a/${AODSL_ARTIFACT} dist/" in final
+    assert "cp repro/a/${AODSL_SBOM} dist/" in final
     assert "cp repro/a/release-manifest.json dist/" in final
 
     assert "python tools/create_release_identity.py" in final
@@ -132,8 +132,8 @@ def test_inv055_final_gate_compares_then_promotes_without_rebuild():
         "python tools/verify_reproducible_artifacts.py",
         "repro/a repro/b",
         "--output dist/reproducibility-manifest.json",
-        "cp repro/a/aodsl-1.0.0-production-source.zip dist/",
-        "cp repro/a/aodsl-1.0.0.cdx.json dist/",
+        "cp repro/a/${AODSL_ARTIFACT} dist/",
+        "cp repro/a/${AODSL_SBOM} dist/",
         "python tools/create_release_identity.py",
         "python tools/verify_release_identity.py",
         "subject-path: 'dist/aodsl-*-production-source.zip'",

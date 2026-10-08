@@ -5,6 +5,8 @@ import argparse
 import json
 from pathlib import Path
 
+from aodsl.certification.version_policy import read_project_version
+
 from aodsl.certification.certified_bundle import (
     BUNDLE_MANIFEST_PATH,
     build_certified_bundle_manifest,
@@ -23,7 +25,12 @@ root = args.bundle_root.resolve()
 out = root / BUNDLE_MANIFEST_PATH
 
 try:
-    manifest = build_certified_bundle_manifest(root)
+    version = read_project_version(
+        Path(__file__).resolve().parents[1] / 'pyproject.toml'
+    )
+    manifest = build_certified_bundle_manifest(
+        root, version=version
+    )
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n",

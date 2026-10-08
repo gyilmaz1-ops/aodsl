@@ -26,6 +26,32 @@ jobs:
     steps:
       - name: Checkout exact release source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+
+      - name: Resolve authoritative release artifact names
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src
+        run: |
+          python - <<'PYVERSION'
+          import os
+          from pathlib import Path
+          from aodsl.certification.version_policy import (
+              read_project_version,
+              artifact_names,
+          )
+
+          version = read_project_version(Path("pyproject.toml"))
+          artifact, sbom = artifact_names(version)
+
+          with open(
+              os.environ["GITHUB_ENV"],
+              "a",
+              encoding="utf-8",
+          ) as output:
+              output.write(f"AODSL_ARTIFACT={artifact}\n")
+              output.write(f"AODSL_SBOM={sbom}\n")
+          PYVERSION
 
       - name: Verify certified build environment
         env:
@@ -67,8 +93,8 @@ jobs:
       - name: Stage reproducibility candidate
         run: |
           mkdir -p repro-output
-          cp dist/aodsl-1.0.0-production-source.zip repro-output/
-          cp dist/aodsl-1.0.0.cdx.json repro-output/
+          cp dist/${AODSL_ARTIFACT} repro-output/
+          cp dist/${AODSL_SBOM} repro-output/
           cp dist/release-manifest.json repro-output/
 
       - name: Upload reproducibility candidate
@@ -90,6 +116,32 @@ jobs:
     steps:
       - name: Checkout exact release source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+
+      - name: Resolve authoritative release artifact names
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src
+        run: |
+          python - <<'PYVERSION'
+          import os
+          from pathlib import Path
+          from aodsl.certification.version_policy import (
+              read_project_version,
+              artifact_names,
+          )
+
+          version = read_project_version(Path("pyproject.toml"))
+          artifact, sbom = artifact_names(version)
+
+          with open(
+              os.environ["GITHUB_ENV"],
+              "a",
+              encoding="utf-8",
+          ) as output:
+              output.write(f"AODSL_ARTIFACT={artifact}\n")
+              output.write(f"AODSL_SBOM={sbom}\n")
+          PYVERSION
 
       - name: Verify certified build environment
         env:
@@ -136,8 +188,8 @@ jobs:
 
       - name: Promote exact verified candidate A
         run: |
-          cp repro/a/aodsl-1.0.0-production-source.zip dist/
-          cp repro/a/aodsl-1.0.0.cdx.json dist/
+          cp repro/a/${AODSL_ARTIFACT} dist/
+          cp repro/a/${AODSL_SBOM} dist/
           cp repro/a/release-manifest.json dist/
 
       - name: Verify promoted deterministic SBOM
@@ -148,8 +200,8 @@ jobs:
           rm -rf dist/certified-bundle-stage
           mkdir -p dist/certified-bundle-stage/dist
           mkdir -p dist/certified-bundle-stage/certification/evidence
-          cp dist/aodsl-1.0.0-production-source.zip dist/certified-bundle-stage/dist/aodsl-1.0.0-production-source.zip
-          cp dist/aodsl-1.0.0.cdx.json dist/certified-bundle-stage/dist/aodsl-1.0.0.cdx.json
+          cp dist/${AODSL_ARTIFACT} dist/certified-bundle-stage/dist/${AODSL_ARTIFACT}
+          cp dist/${AODSL_SBOM} dist/certified-bundle-stage/dist/${AODSL_SBOM}
           cp dist/release-manifest.json dist/certified-bundle-stage/dist/release-manifest.json
           cp dist/reproducibility-manifest.json dist/certified-bundle-stage/dist/reproducibility-manifest.json
           cp certification/production-certification-manifest.json dist/certified-bundle-stage/certification/production-certification-manifest.json

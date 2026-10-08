@@ -124,7 +124,7 @@ def test_commented_exact_zip_promotion_is_rejected(
 ) -> None:
     workflow = mutant_workflow(
         tmp_path,
-        "cp repro/a/aodsl-1.0.0-production-source.zip dist/",
+        "cp repro/a/${AODSL_ARTIFACT} dist/",
     )
 
     assert_rejected(script, workflow)
