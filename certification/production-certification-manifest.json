@@ -26,17 +26,17 @@
       "status": "CERTIFIED"
     },
     "production_deployment": "CERTIFIED",
-    "sha256": "e55030b55578a394eccf4fe2d1b4eae09f3c5faa151f4646c01a98eb0da5bfda",
-    "tested_source_tree_sha256": "638429fd758cbc6c4f70434e9f69512ad11620284913d05b2825a3a66ae14796"
+    "sha256": "8b273e5a616085195a71fa674221543e3707f2b97a1b4e2722bbbeb1c3ca4a8a",
+    "tested_source_tree_sha256": "f59f7b8c6ecb19719b40cfda313f093e7f76378f7066be1bfdd0bf7148ec6696"
   },
   "hash_algorithm": "sha256",
   "product": {
     "name": "aodsl",
-    "version": "1.0.10"
+    "version": "1.0.11"
   },
   "schema": "aodsl.production-certification.v1",
   "source": {
-    "canonical_tree_sha256": "638429fd758cbc6c4f70434e9f69512ad11620284913d05b2825a3a66ae14796",
-    "entry_count": 282
+    "canonical_tree_sha256": "f59f7b8c6ecb19719b40cfda313f093e7f76378f7066be1bfdd0bf7148ec6696",
+    "entry_count": 283
   }
 }
