@@ -34,7 +34,7 @@ from .temporal import active_revision_at, available_at
 from .types import NodeType
 from .validation import DomainValidationError, validate_edge, validate_node
 
-__version__ = "1.0.10"
+__version__ = "1.0.11"
 
 __all__ = [
     "NodeType",
