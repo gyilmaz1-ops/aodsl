@@ -44,6 +44,22 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Configure workspace Git trust
+        run: |
+          python - <<'CHECK'
+          import os
+          from pathlib import Path
+          import subprocess
+
+          workspace = Path(os.environ["GITHUB_WORKSPACE"]).resolve()
+          assert workspace == Path.cwd().resolve()
+          subprocess.run([
+              "/usr/bin/git", "config", "--global", "--add",
+              "safe.directory", str(workspace),
+          ], check=True)
+          print("WORKSPACE_GIT_TRUST: PASS")
+          CHECK
+
       - name: Verify checked-out commit
         run: |
           python - <<'CHECK'
