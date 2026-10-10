@@ -1,22 +1,25 @@
 name: AODSL Production Release
 
 on:
-  workflow_dispatch:
   push:
     tags:
       - "v*"
 
 permissions:
   contents: read
-  id-token: write
-  attestations: write
 
 jobs:
   reproducible-build:
+    permissions:
+      contents: read
+      packages: read
     name: Reproducible Build ${{ matrix.build }}
     runs-on: ubuntu-latest
     container:
-      image: python@sha256:47ae396f09c1303b8653019811a8498470603d7ffefc29cb07c88f1f8cb3d19f
+      image: ghcr.io/gyilmaz1-ops/aodsl-build-git@sha256:0574165e4b162022d2f6b79528f07d2780f99bb4105ae996128c6530dedb7597
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     timeout-minutes: 15
     strategy:
       fail-fast: false
@@ -28,6 +31,27 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 0
+
+      - name: Configure workspace Git trust
+        run: |
+          python - <<'CHECK'
+          import os
+          from pathlib import Path
+          import subprocess
+
+          workspace = Path(os.environ["GITHUB_WORKSPACE"]).resolve()
+          assert workspace == Path.cwd().resolve()
+          subprocess.run([
+              "/usr/bin/git", "config", "--global", "--add",
+              "safe.directory", str(workspace),
+          ], check=True)
+          print("WORKSPACE_GIT_TRUST: PASS")
+          CHECK
+
+      - name: Verify release source reference
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src
+        run: python tools/verify_release_source_ref.py
 
       - name: Resolve authoritative release artifact names
         env:
@@ -106,11 +130,19 @@ jobs:
           retention-days: 1
 
   production-gate:
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      packages: read
     name: Certified Production Promotion
     needs: reproducible-build
     runs-on: ubuntu-latest
     container:
-      image: python@sha256:47ae396f09c1303b8653019811a8498470603d7ffefc29cb07c88f1f8cb3d19f
+      image: ghcr.io/gyilmaz1-ops/aodsl-build-git@sha256:0574165e4b162022d2f6b79528f07d2780f99bb4105ae996128c6530dedb7597
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     timeout-minutes: 15
 
     steps:
@@ -118,6 +150,27 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 0
+
+      - name: Configure workspace Git trust
+        run: |
+          python - <<'CHECK'
+          import os
+          from pathlib import Path
+          import subprocess
+
+          workspace = Path(os.environ["GITHUB_WORKSPACE"]).resolve()
+          assert workspace == Path.cwd().resolve()
+          subprocess.run([
+              "/usr/bin/git", "config", "--global", "--add",
+              "safe.directory", str(workspace),
+          ], check=True)
+          print("WORKSPACE_GIT_TRUST: PASS")
+          CHECK
+
+      - name: Verify release source reference
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src
+        run: python tools/verify_release_source_ref.py
 
       - name: Resolve authoritative release artifact names
         env:
@@ -232,20 +285,20 @@ jobs:
       - name: Generate signed build provenance
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
         with:
-          subject-path: 'dist/aodsl-*-production-source.zip'
+          subject-path: 'dist/${{ env.AODSL_ARTIFACT }}'
 
       - name: Generate signed SBOM provenance
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
         with:
-          subject-path: 'dist/aodsl-*.cdx.json'
+          subject-path: 'dist/${{ env.AODSL_SBOM }}'
 
       - name: Upload certified artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: aodsl-certified-production
           path: |
-            dist/aodsl-*-production-source.zip
-            dist/aodsl-*.cdx.json
+            dist/${{ env.AODSL_ARTIFACT }}
+            dist/${{ env.AODSL_SBOM }}
             dist/release-manifest.json
             dist/reproducibility-manifest.json
             dist/certified-bundle-manifest.json

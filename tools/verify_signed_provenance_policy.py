@@ -228,6 +228,26 @@ def parse_steps(job: list[str]) -> list[dict[str, object]]:
 
             i += 1
 
+
+        # Interpret the explicit literal file list under with.path.
+        path_starts = [
+            j for j, line in enumerate(raw)
+            if line == "          path: |"
+        ]
+        if path_starts:
+            if len(path_starts) != 1:
+                fail("duplicate upload path block")
+            paths = []
+            for line in raw[path_starts[0] + 1:]:
+                if not meaningful(line):
+                    continue
+                if indent(line) <= 10:
+                    break
+                if indent(line) != 12:
+                    fail("invalid upload path indentation")
+                paths.append(line.strip())
+            step["with"]["path"] = "\n".join(paths)
+
         steps.append(step)
 
     return steps
@@ -279,35 +299,28 @@ def find_named_step(
     return matches[0]
 
 
-def permissions(lines: list[str]) -> dict[str, str]:
+def permissions(lines, level=0, required=True):
+    prefix = " " * level + "permissions:"
     starts = [
-        index
-        for index, line in enumerate(lines)
-        if line == "permissions:"
+        i for i, line in enumerate(lines)
+        if line.startswith(prefix)
     ]
-
-    if len(starts) != 1:
-        fail("workflow must contain exactly one permissions mapping")
-
-    result: dict[str, str] = {}
-
+    if not starts and not required:
+        return {}
+    if len(starts) != 1 or lines[starts[0]] != prefix:
+        fail("permissions must be a single explicit mapping")
+    result = {}
     for line in lines[starts[0] + 1:]:
-        if meaningful(line) and indent(line) == 0:
+        if not meaningful(line):
+            continue
+        if indent(line) <= level:
             break
-
-        if meaningful(line) and indent(line) == 2:
-            text = line.strip()
-
-            if ":" not in text:
-                fail("invalid workflow permission entry")
-
-            key, value = text.split(":", 1)
-
-            if key in result:
-                fail(f"duplicate workflow permission: {key}")
-
-            result[key] = value.strip()
-
+        if indent(line) != level + 2 or ":" not in line:
+            fail("invalid permission entry")
+        key, value = line.strip().split(":", 1)
+        if key in result:
+            fail(f"duplicate permission: {key}")
+        result[key] = value.strip()
     return result
 
 
@@ -318,21 +331,48 @@ lines = WORKFLOW.read_text(
     encoding="utf-8"
 ).splitlines()
 
-perms = permissions(lines)
-
-for key, expected in (
-    ("contents", "read"),
-    ("id-token", "write"),
-    ("attestations", "write"),
-):
-    if perms.get(key) != expected:
-        fail(
-            f"workflow permission invalid: "
-            f"{key}={perms.get(key)!r}"
-        )
-
 build_job = find_job(lines, "reproducible-build")
 final_job = find_job(lines, "production-gate")
+
+if permissions(lines) != {"contents": "read"}:
+    fail("workflow permissions must be exactly contents: read")
+if permissions(build_job, 4) != {"contents": "read", "packages": "read"}:
+    fail("reproducible-build permissions must be contents/read and packages/read")
+if permissions(final_job, 4) != {
+    "contents": "read",
+    "id-token": "write",
+    "attestations": "write",
+    "packages": "read",
+}:
+    fail("production-gate permissions invalid")
+
+REGISTRY_REFERENCE = 'ghcr.io/gyilmaz1-ops/aodsl-build-git@sha256:0574165e4b162022d2f6b79528f07d2780f99bb4105ae996128c6530dedb7597'
+
+def require_registry_credentials(job):
+    starts = [
+        i for i, line in enumerate(job)
+        if line == "    container:"
+    ]
+    if len(starts) != 1:
+        fail("container mapping must occur exactly once")
+    block = []
+    for line in job[starts[0] + 1:]:
+        if not meaningful(line):
+            continue
+        if indent(line) <= 4:
+            break
+        block.append(line)
+    expected = [
+        "      image: " + REGISTRY_REFERENCE,
+        "      credentials:",
+        "        username: ${{ github.actor }}",
+        "        password: ${{ secrets.GITHUB_TOKEN }}",
+    ]
+    if block != expected:
+        fail("container image or registry credentials invalid")
+
+require_registry_credentials(build_job)
+require_registry_credentials(final_job)
 
 if matrix_build(build_job) != "[a, b]":
     fail("reproducible-build matrix must be [a, b]")
@@ -340,8 +380,65 @@ if matrix_build(build_job) != "[a, b]":
 if scalar(final_job, "needs") != "reproducible-build":
     fail("production-gate needs contract invalid")
 
+
+
+EXPECTED_WORKSPACE_GIT_TRUST = 'python - <<\'CHECK\'\nimport os\nfrom pathlib import Path\nimport subprocess\nworkspace = Path(os.environ["GITHUB_WORKSPACE"]).resolve()\nassert workspace == Path.cwd().resolve()\nsubprocess.run([\n"/usr/bin/git", "config", "--global", "--add",\n"safe.directory", str(workspace),\n], check=True)\nprint("WORKSPACE_GIT_TRUST: PASS")\nCHECK'
+
+def require_workspace_git_trust(steps):
+    trust = find_named_step(steps, "Configure workspace Git trust")
+    if executable_text(steps[trust]) != EXPECTED_WORKSPACE_GIT_TRUST:
+        fail("workspace Git trust executable contract invalid")
+    checkouts = [
+        index for index, step in enumerate(steps)
+        if step["uses"] ==
+        "actions/checkout@11d5960a326750d5838078e36cf38b85af677262"
+    ]
+    if len(checkouts) != 1:
+        fail("workspace Git trust requires exactly one pinned checkout")
+    source_ref = find_exec_step(
+        steps, "python tools/verify_release_source_ref.py"
+    )
+    if not checkouts[0] < trust < source_ref:
+        fail("workspace Git trust must follow checkout and precede source ref")
+
 build = parse_steps(build_job)
 final = parse_steps(final_job)
+
+require_workspace_git_trust(build)
+require_workspace_git_trust(final)
+
+expected_paths = [
+    "dist/${{ env.AODSL_ARTIFACT }}",
+    "dist/${{ env.AODSL_SBOM }}",
+    "dist/release-manifest.json",
+    "dist/reproducibility-manifest.json",
+    "dist/certified-bundle-manifest.json",
+    "dist/certified-release-identity.json",
+    "certification/production-certification-manifest.json",
+    "certification/production-certification-attestation.json",
+    "certification/evidence/live-certification-status.json",
+]
+upload_index = find_named_step(final, "Upload certified artifact")
+upload_settings = final[upload_index]["with"]
+if upload_settings.get("path", "").splitlines() != expected_paths:
+    fail("certified upload must contain exactly the approved file list")
+if upload_settings.get("if-no-files-found") != "error":
+    fail("certified upload must fail on missing files")
+
+attest_action = "actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6"
+attest_steps = [
+    (i, step) for i, step in enumerate(final)
+    if step["uses"] == attest_action
+]
+expected_subjects = [
+    "'dist/${{ env.AODSL_ARTIFACT }}'",
+    "'dist/${{ env.AODSL_SBOM }}'",
+]
+if [step["with"].get("subject-path") for _, step in attest_steps] != expected_subjects:
+    fail("attestation subjects must use the exact approved ZIP and SBOM")
+identity_index = find_exec_step(final, "python tools/verify_release_identity.py")
+if not (identity_index < attest_steps[0][0] < attest_steps[1][0] < upload_index):
+    fail("attestations must follow identity verification and precede upload")
 
 for required in (
     "python tools/release_gate.py --production",
@@ -417,8 +514,8 @@ subjects = [
 ]
 
 if subjects != [
-    "'dist/aodsl-*-production-source.zip'",
-    "'dist/aodsl-*.cdx.json'",
+    "'dist/${{ env.AODSL_ARTIFACT }}'",
+    "'dist/${{ env.AODSL_SBOM }}'",
 ]:
     fail("production-gate attestation subjects invalid")
 

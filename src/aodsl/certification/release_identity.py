@@ -176,7 +176,7 @@ def build_release_identity(
 
     if (
         reproducibility.get("schema")
-        != "aodsl.reproducible-release-artifact.v1"
+        != "aodsl.reproducible-release-artifact.v2"
     ):
         raise ValueError("invalid reproducibility manifest schema")
     if reproducibility.get("invariant") != "INV-055":
@@ -204,6 +204,27 @@ def build_release_identity(
         raise ValueError("reproducibility SBOM path mismatch")
     if reproducible_sbom.get("sha256") != sbom_sha:
         raise ValueError("reproducibility SBOM SHA-256 mismatch")
+
+    release_manifest_path = (root / "dist/release-manifest.json").resolve()
+    if not release_manifest_path.is_file():
+        raise ValueError("release manifest missing")
+
+    reproducible_release_manifest = reproducibility.get("release_manifest")
+    if not isinstance(reproducible_release_manifest, dict):
+        raise ValueError("reproducibility release manifest binding missing")
+
+    if (
+        reproducible_release_manifest.get("path")
+        != "dist/release-manifest.json"
+    ):
+        raise ValueError("reproducibility release manifest path mismatch")
+
+    release_manifest_sha = _sha256_file(release_manifest_path)
+    if (
+        reproducible_release_manifest.get("sha256")
+        != release_manifest_sha
+    ):
+        raise ValueError("reproducibility release manifest SHA-256 mismatch")
 
     staged_bundle_manifest_path = (
         bundle_root / BUNDLE_MANIFEST_PATH
@@ -286,6 +307,7 @@ def build_release_identity(
             "result": comparison["result"],
             "artifact_sha256": artifact_sha,
             "sbom_sha256": sbom_sha,
+            "release_manifest_sha256": release_manifest_sha,
         },
         "build_environment": {
             "manifest_path": "architecture/build-environment.v1.json",

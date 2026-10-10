@@ -321,11 +321,28 @@ def test_release_identity_binds_sbom_and_lock(
 
     write_sbom(root, sbom)
 
+    release_manifest = root / "dist/release-manifest.json"
+    release_manifest.write_text(
+        json.dumps(
+            {
+                "version": "1.0.0",
+                "mode": "production",
+                "artifact": artifact.name,
+                "sha256": sha256(artifact),
+                "files": 1,
+                "production_certification_manifest_sha256": "c" * 64,
+                "certified_source_tree_sha256": "b" * 64,
+            },
+            sort_keys=True,
+        ) + "\n",
+        encoding="utf-8",
+    )
+
     reproducibility = root / "dist/reproducibility-manifest.json"
     reproducibility.write_text(
         json.dumps(
             {
-                "schema": "aodsl.reproducible-release-artifact.v1",
+                "schema": "aodsl.reproducible-release-artifact.v2",
                 "invariant": "INV-055",
                 "comparison": {
                     "algorithm": "sha256-and-byte-equality",
@@ -340,6 +357,10 @@ def test_release_identity_binds_sbom_and_lock(
                     "path": "dist/aodsl-1.0.0.cdx.json",
                     "sha256": sha256(sbom),
                 },
+                "release_manifest": {
+                    "path": "dist/release-manifest.json",
+                    "sha256": sha256(release_manifest),
+                },
             },
             sort_keys=True,
         )
@@ -352,10 +373,6 @@ def test_release_identity_binds_sbom_and_lock(
         exist_ok=True,
     )
 
-    (root / "dist/release-manifest.json").write_text(
-        json.dumps({"release": "fixture"}, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
     (
         root
         / "certification/production-certification-attestation.json"
@@ -566,7 +583,7 @@ def test_production_workflow_enforces_dependency_and_sbom_contract() -> None:
     promoted_sbom_verify = "python tools/verify_sbom.py"
     identity_create = "python tools/create_release_identity.py"
     identity_verify = "python tools/verify_release_identity.py"
-    sbom_subject = "subject-path: 'dist/aodsl-*.cdx.json'"
+    sbom_subject = "subject-path: 'dist/${{ env.AODSL_SBOM }}'"
     certified_upload = "name: aodsl-certified-production"
 
     for required in (

@@ -89,7 +89,12 @@ def validate_git_release_identity(
                 text=True,
                 capture_output=True,
                 check=False,
+                timeout=30,
             )
+        except subprocess.TimeoutExpired as exc:
+            raise ValueError(
+                "git identity lookup timed out"
+            ) from exc
         except OSError as exc:
             raise ValueError("unable to execute git") from exc
 

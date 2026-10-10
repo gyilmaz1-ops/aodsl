@@ -27,7 +27,7 @@ def test_attestation_subject_is_production_artifact():
 
     assert "uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6" in final
     assert (
-        "subject-path: 'dist/aodsl-*-production-source.zip'"
+        "subject-path: 'dist/${{ env.AODSL_ARTIFACT }}'"
         in final
     )
 

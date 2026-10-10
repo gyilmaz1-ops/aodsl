@@ -5,7 +5,7 @@ from aodsl.certification.version_policy import read_project_version
 SCHEMA="aodsl.production-certification.v1"; HASH_ALGORITHM="sha256"
 EXCLUDED_DIRS={".git",".pytest_cache","__pycache__",".mypy_cache",".ruff_cache",".venv","venv","dist","build"}
 EXCLUDED_FILES={"certification/production-certification-manifest.json","certification/production-certification-attestation.json","certification/evidence/live-certification-status.json"}
-INCLUDED_ROOTS=("src","tests","tools","architecture","deploy","examples","editors","requirements")
+INCLUDED_ROOTS=('src', 'tests', 'tools', 'architecture', 'deploy', 'examples', 'editors', 'requirements', '.github/workflows')
 INCLUDED_TOP_LEVEL=("pyproject.toml",)
 def canonical_json_bytes(v): return json.dumps(v,sort_keys=True,separators=(",",":"),ensure_ascii=False).encode()
 def sha256_bytes(b): return hashlib.sha256(b).hexdigest()

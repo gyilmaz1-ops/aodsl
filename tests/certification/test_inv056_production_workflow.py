@@ -133,8 +133,8 @@ def test_inv056_certified_upload_is_explicit_and_excludes_stage():
     upload = final[start:]
 
     expected = (
-        "dist/aodsl-*-production-source.zip",
-        "dist/aodsl-*.cdx.json",
+        "dist/${{ env.AODSL_ARTIFACT }}",
+        "dist/${{ env.AODSL_SBOM }}",
         "dist/release-manifest.json",
         "dist/reproducibility-manifest.json",
         "dist/certified-bundle-manifest.json",

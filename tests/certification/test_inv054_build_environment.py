@@ -19,8 +19,8 @@ WORKFLOW = ROOT / ".github" / "workflows" / "production-release.yml"
 BUILD_LOCK = ROOT / "requirements" / "build.lock"
 
 EXPECTED_OCI = (
-    "python@sha256:"
-    "47ae396f09c1303b8653019811a8498470603d7ffefc29cb07c88f1f8cb3d19f"
+    'ghcr.io/gyilmaz1-ops/aodsl-build-git@sha256:'
+    "0574165e4b162022d2f6b79528f07d2780f99bb4105ae996128c6530dedb7597"
 )
 
 

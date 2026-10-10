@@ -13,8 +13,19 @@ RAW_ARCHIVE = ROOT / "certification/evidence/live-certification-status.raw.json"
 
 
 def main() -> int:
+    source_before = canonical_source_tree_sha256(ROOT)
     status = certification_status()
-    status["tested_source_tree_sha256"] = canonical_source_tree_sha256(ROOT)
+    source_after = canonical_source_tree_sha256(ROOT)
+    if source_before != source_after:
+        print(json.dumps({
+            "status": "NOT_CERTIFIED",
+            "verification": "FAIL_CLOSED",
+            "errors": ["INV-049 source changed during certification"],
+            "source_before": source_before,
+            "source_after": source_after,
+        }, indent=2, sort_keys=True))
+        return 2
+    status["tested_source_tree_sha256"] = source_before
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(json.dumps(status, indent=2, sort_keys=True) + "\n")
     print(json.dumps(status, indent=2, sort_keys=True))
