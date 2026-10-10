@@ -1,0 +1,19 @@
+FROM python@sha256:47ae396f09c1303b8653019811a8498470603d7ffefc29cb07c88f1f8cb3d19f
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN set -eu; \
+    printf '%s\n' \
+      'deb [check-valid-until=no signed-by=/usr/share/keyrings/debian-archive-keyring.pgp] https://snapshot.debian.org/archive/debian/20250929T000000Z/ trixie main' \
+      > /etc/apt/sources.list.d/aodsl-snapshot.list; \
+    rm -f /etc/apt/sources.list.d/debian.sources; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends git=1:2.47.3-0+deb13u1; \
+    test "$(git --version)" = "git version 2.47.3"; \
+    dpkg --audit; \
+    rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*.deb
+
+RUN set -eu; \
+    test "$(python --version)" = "Python 3.12.11"; \
+    python -c 'import importlib.metadata; assert importlib.metadata.version("pip") == "25.0.1"'; \
+    test "$(/usr/bin/git --version)" = "git version 2.47.3"

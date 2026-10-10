@@ -106,11 +106,30 @@ def fixture(tmp_path: Path):
     artifact = tmp_path / "dist/aodsl-1.0.0-production-source.zip"
     artifact.write_bytes(b"artifact")
 
+    release_manifest = tmp_path / "dist/release-manifest.json"
+    release_manifest.write_text(
+        json.dumps(
+            {
+                "version": "1.0.0",
+                "mode": "production",
+                "artifact": artifact.name,
+                "sha256": hashlib.sha256(
+                    artifact.read_bytes()
+                ).hexdigest(),
+                "files": 1,
+                "production_certification_manifest_sha256": "c" * 64,
+                "certified_source_tree_sha256": SOURCE,
+            },
+            sort_keys=True,
+        ) + "\n",
+        encoding="utf-8",
+    )
+
     reproducibility = tmp_path / "dist/reproducibility-manifest.json"
     reproducibility.write_text(
         json.dumps(
             {
-                "schema": "aodsl.reproducible-release-artifact.v1",
+                "schema": "aodsl.reproducible-release-artifact.v2",
                 "invariant": "INV-055",
                 "comparison": {
                     "algorithm": "sha256-and-byte-equality",
@@ -127,6 +146,12 @@ def fixture(tmp_path: Path):
                     "path": "dist/aodsl-1.0.0.cdx.json",
                     "sha256": hashlib.sha256(
                         sbom.read_bytes()
+                    ).hexdigest(),
+                },
+                "release_manifest": {
+                    "path": "dist/release-manifest.json",
+                    "sha256": hashlib.sha256(
+                        release_manifest.read_bytes()
                     ).hexdigest(),
                 },
             },
@@ -154,10 +179,6 @@ def fixture(tmp_path: Path):
     # Remaining INV-056 certified payload/evidence files.
     (tmp_path / "certification/evidence").mkdir(parents=True)
 
-    (tmp_path / "dist/release-manifest.json").write_text(
-        json.dumps({"release": "fixture"}, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
     (
         tmp_path
         / "certification/production-certification-attestation.json"
@@ -633,7 +654,7 @@ def test_v5_binds_reproducibility_manifest_and_cross_links(tmp_path):
     assert block["manifest_sha256"] == hashlib.sha256(
         reproducibility.read_bytes()
     ).hexdigest()
-    assert block["schema"] == "aodsl.reproducible-release-artifact.v1"
+    assert block["schema"] == "aodsl.reproducible-release-artifact.v2"
     assert block["invariant"] == "INV-055"
     assert block["comparison_algorithm"] == "sha256-and-byte-equality"
     assert block["independent_builds"] == 2

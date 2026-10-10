@@ -67,6 +67,16 @@ try:
 except ValueError as exc:
     raise SystemExit(f"VERSION-011: {exc}") from exc
 
+if production:
+    from aodsl.certification.release_source import (
+        verify_production_source_alignment,
+    )
+    try:
+        verify_production_source_alignment(ROOT)
+    except (ValueError, OSError, subprocess.SubprocessError) as exc:
+        raise SystemExit(f"PRODUCTION RELEASE SOURCE: BLOCKED — {exc}") from exc
+    print("PRODUCTION RELEASE SOURCE ALIGNMENT: PASSED")
+
 print("VERSION CONSISTENCY: PASSED", pv)
 
 run([sys.executable,str(ROOT/"tools/architecture_freeze_gate.py")])
@@ -104,7 +114,7 @@ if production:
         raise SystemExit("PRODUCTION RELEASE GATE: NOT_CERTIFIED — CERT-PG-001")
     if pm.get("evidence",{}).get("production_deployment")!="CERTIFIED":
         raise SystemExit("PRODUCTION RELEASE GATE: NOT_CERTIFIED — production deployment")
-    prod_manifest_sha=pa["manifest_sha256"]
+    prod_manifest_sha=hashlib.sha256((ROOT/"certification/production-certification-manifest.json").read_bytes()).hexdigest()
     prod_source_sha=pm["source"]["canonical_tree_sha256"]
     print("PRODUCTION RELEASE GATE: PASSED")
 

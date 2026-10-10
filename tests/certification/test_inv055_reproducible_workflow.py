@@ -7,8 +7,8 @@ ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github/workflows/production-release.yml"
 
 EXACT_IMAGE = (
-    "python@sha256:"
-    "47ae396f09c1303b8653019811a8498470603d7ffefc29cb07c88f1f8cb3d19f"
+    'ghcr.io/gyilmaz1-ops/aodsl-build-git@sha256:'
+    "0574165e4b162022d2f6b79528f07d2780f99bb4105ae996128c6530dedb7597"
 )
 
 
@@ -120,8 +120,8 @@ def test_inv055_final_gate_compares_then_promotes_without_rebuild():
     assert "python tools/create_release_identity.py" in final
     assert "python tools/verify_release_identity.py" in final
 
-    assert "subject-path: 'dist/aodsl-*-production-source.zip'" in final
-    assert "subject-path: 'dist/aodsl-*.cdx.json'" in final
+    assert "subject-path: 'dist/${{ env.AODSL_ARTIFACT }}'" in final
+    assert "subject-path: 'dist/${{ env.AODSL_SBOM }}'" in final
 
     assert "name: aodsl-certified-production" in final
     assert "dist/reproducibility-manifest.json" in final
@@ -136,8 +136,8 @@ def test_inv055_final_gate_compares_then_promotes_without_rebuild():
         "cp repro/a/${AODSL_SBOM} dist/",
         "python tools/create_release_identity.py",
         "python tools/verify_release_identity.py",
-        "subject-path: 'dist/aodsl-*-production-source.zip'",
-        "subject-path: 'dist/aodsl-*.cdx.json'",
+        "subject-path: 'dist/${{ env.AODSL_ARTIFACT }}'",
+        "subject-path: 'dist/${{ env.AODSL_SBOM }}'",
         "name: aodsl-certified-production",
     )
 

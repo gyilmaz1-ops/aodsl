@@ -63,11 +63,27 @@ def versioned_chain(tmp_path):
     old_artifact.unlink()
     old_sbom.unlink()
 
+    release_manifest = tmp_path / "dist/release-manifest.json"
+    release_data = json.loads(release_manifest.read_text())
+
+    release_data["version"] = VERSION
+    release_data["artifact"] = artifact_name
+    release_data["sha256"] = sha256(artifact)
+
+    release_manifest.write_text(
+        json.dumps(release_data, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
     data = json.loads(reproducibility.read_text())
     data["artifact"]["path"] = f"dist/{artifact_name}"
     data["artifact"]["sha256"] = sha256(artifact)
     data["sbom"]["path"] = f"dist/{sbom_name}"
     data["sbom"]["sha256"] = sha256(sbom)
+    data["release_manifest"] = {
+        "path": "dist/release-manifest.json",
+        "sha256": sha256(release_manifest),
+    }
 
     reproducibility.write_text(
         json.dumps(data, indent=2, sort_keys=True) + "\n"
@@ -77,6 +93,7 @@ def versioned_chain(tmp_path):
         f"dist/{artifact_name}",
         f"dist/{sbom_name}",
         "dist/reproducibility-manifest.json",
+        "dist/release-manifest.json",
     ):
         destination = bundle_root / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -239,3 +256,35 @@ def test_identity_rejects_sbom_tampering(versioned_chain):
     assert errors == [
         "reproducibility SBOM SHA-256 mismatch"
     ]
+
+
+def test_versioned_release_manifest_consistency(versioned_chain):
+    chain = versioned_chain
+    root = chain["args"][0]
+
+    manifest_path = root / "dist/release-manifest.json"
+    reproducibility_path = (
+        root / "dist/reproducibility-manifest.json"
+    )
+
+    manifest = json.loads(manifest_path.read_text())
+    evidence = json.loads(reproducibility_path.read_text())
+
+    assert manifest["version"] == VERSION
+    assert manifest["mode"] == "production"
+    assert manifest["artifact"] == chain["artifact"].name
+    assert manifest["sha256"] == sha256(chain["artifact"])
+
+    assert evidence["schema"] == (
+        "aodsl.reproducible-release-artifact.v2"
+    )
+    assert evidence["release_manifest"] == {
+        "path": "dist/release-manifest.json",
+        "sha256": sha256(manifest_path),
+    }
+
+    staged_manifest = (
+        chain["bundle_root"] / "dist/release-manifest.json"
+    )
+
+    assert staged_manifest.read_bytes() == manifest_path.read_bytes()
