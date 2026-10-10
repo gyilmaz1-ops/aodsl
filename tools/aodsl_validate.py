@@ -5,6 +5,7 @@ import argparse
 import ast
 import hashlib
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -74,7 +75,15 @@ def snapshot(root):
     return sorted(result, key=lambda x: x["path"])
 
 
-def audit(root, checkpoint):
+def commit_sha(value):
+    if not re.fullmatch(r"[0-9a-f]{40}", value):
+        raise argparse.ArgumentTypeError(
+            "expected a full lowercase 40-character commit SHA"
+        )
+    return value
+
+
+def audit(root, checkpoint, expected_head=EXPECTED_HEAD):
     head_before = git(
         root, "rev-parse", "HEAD"
     ).decode().strip()
@@ -95,7 +104,7 @@ def audit(root, checkpoint):
         for name in test_paths
     }
 
-    if head_before != EXPECTED_HEAD:
+    if head_before != expected_head:
         errors.append("HEAD_MISMATCH")
 
     for name in CHECKPOINTS[checkpoint]:
@@ -156,7 +165,7 @@ def audit(root, checkpoint):
         "mode": "read-only",
         "audit_type": "STATIC_PREFLIGHT",
         "head": head_before,
-        "expected_head": EXPECTED_HEAD,
+        "expected_head": expected_head,
         "worktree_clean": not bool(before),
         "worktree_entries": len(before),
         "worktree_snapshot": before,
@@ -184,12 +193,18 @@ def main():
         "--report",
         action="store_true",
     )
+    parser.add_argument(
+        "--expected-head",
+        type=commit_sha,
+        default=EXPECTED_HEAD,
+        help="Expected full commit SHA; defaults to the historical checkpoint",
+    )
     args = parser.parse_args()
 
     root = Path(__file__).resolve().parent.parent
 
     try:
-        result = audit(root, args.checkpoint)
+        result = audit(root, args.checkpoint, args.expected_head)
     except (OSError, subprocess.CalledProcessError) as exc:
         result = {
             "checkpoint": args.checkpoint,
