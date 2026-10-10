@@ -1,0 +1,58 @@
+name: GHCR Container Preflight
+
+on:
+  push:
+    branches:
+      - ci/ghcr-preflight-20261010
+
+permissions:
+  contents: read
+
+jobs:
+  container-preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: read
+    container:
+      image: ghcr.io/gyilmaz1-ops/aodsl-build-git@sha256:0574165e4b162022d2f6b79528f07d2780f99bb4105ae996128c6530dedb7597
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Verify container toolchain
+        run: |
+          python - <<'CHECK'
+          import importlib.metadata
+          import platform
+          import subprocess
+
+          assert platform.python_version() == "3.12.11"
+          assert importlib.metadata.version("pip") == "25.0.1"
+          assert platform.machine() == "x86_64"
+          for executable in ("/usr/bin/git", "git"):
+              assert subprocess.check_output(
+                  [executable, "--version"], text=True
+              ).strip() == "git version 2.47.3"
+          print("GHCR_CONTAINER_TOOLCHAIN: PASS")
+          CHECK
+
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify checked-out commit
+        run: |
+          python - <<'CHECK'
+          import os
+          import subprocess
+
+          head = subprocess.check_output(
+              ["/usr/bin/git", "rev-parse", "HEAD"], text=True
+          ).strip()
+          assert head == os.environ["GITHUB_SHA"]
+          print("CHECKOUT_COMMIT_BINDING: PASS")
+          CHECK
